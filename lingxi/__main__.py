@@ -1,0 +1,479 @@
+import sys
+import logging
+import argparse
+from typing import Optional
+from lingxi.utils.config import load_config
+from lingxi.utils.logging import setup_logging
+from lingxi.core.session import SessionManager
+from lingxi.core.classifier import TaskClassifier
+from lingxi.core.mode_selector import ExecutionModeSelector
+from lingxi.core.skill_caller import SkillCaller
+
+
+class LingxiAssistant:
+    """灵犀智能助手主类"""
+
+    def __init__(self, config_path: str = "config.yaml"):
+        """初始化灵犀助手
+
+        Args:
+            config_path: 配置文件路径
+        """
+        self.config = load_config(config_path)
+        setup_logging(self.config)
+        self.logger = logging.getLogger(__name__)
+
+        self.logger.info(f"启动{self.config.get('system', {}).get('name', '灵犀')}智能助手")
+        self.logger.info(f"版本: {self.config.get('system', {}).get('version', '0.2.0')}")
+
+        self.session_manager = SessionManager(self.config)
+        self.classifier = TaskClassifier(self.config)
+        self.skill_caller = SkillCaller(self.config)
+        self.mode_selector = ExecutionModeSelector(self.config, self.skill_caller)
+
+    def process_input(self, user_input: str, session_id: str = "default") -> str:
+        """处理用户输入
+
+        Args:
+            user_input: 用户输入
+            session_id: 会话ID
+
+        Returns:
+            系统响应
+        """
+        self.logger.debug(f"处理用户输入: {user_input}")
+
+        self.session_manager.add_turn(session_id, "user", user_input)
+
+        try:
+            # 先检查是否是安装技能的请求
+            install_result = self._check_install_skill_intent(user_input)
+            if install_result:
+                skill_path, skill_name = install_result
+                success = self.install_skill(skill_path, skill_name)
+                if success:
+                    response = f"技能安装成功: {skill_path}"
+                else:
+                    response = f"技能安装失败: {skill_path}"
+                self.session_manager.add_turn(session_id, "assistant", response)
+                return response
+
+            task_info = self.classifier.classify(user_input)
+            self.logger.debug(f"任务分类: {task_info}")
+
+            mode = self.mode_selector.select_mode(task_info["level"])
+            self.logger.debug(f"选择执行模式: {mode}")
+
+            engine = self.mode_selector.get_engine(mode, self.session_manager)
+
+            history = self.session_manager.get_history(session_id)
+
+            response = engine.process(
+                user_input=user_input,
+                task_info=task_info,
+                session_history=history,
+                session_id=session_id
+            )
+
+            self.session_manager.add_turn(session_id, "assistant", response)
+
+            return response
+
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            self.logger.error(f"处理失败: {e}\n{error_trace}")
+            error_response = f"抱歉，处理您的请求时出现错误：{str(e)}\n\n堆栈信息:\n{error_trace}"
+            self.session_manager.add_turn(session_id, "assistant", error_response)
+            return error_response
+
+    def _check_install_skill_intent(self, user_input: str) -> Optional[tuple]:
+        """检查是否是安装技能的请求
+
+        Args:
+            user_input: 用户输入
+
+        Returns:
+            如果是安装请求，返回 (skill_path, skill_name)，否则返回 None
+        """
+        import re
+        from pathlib import Path
+
+        user_input_lower = user_input.lower()
+
+        # 检查是否包含安装技能的关键词
+        install_keywords = ['安装技能', 'install skill', '添加技能']
+        has_install_keyword = any(kw in user_input_lower for kw in install_keywords)
+        
+        if not has_install_keyword:
+            return None
+
+        # 提取路径和名称
+        skill_path = None
+        skill_name = None
+
+        # 尝试匹配带名称的格式
+        name_patterns = [
+            r'安装技能\s+(.+?)\s*(?:名称为|name\s+is|as)\s+(.+)',
+            r'install\s+skill\s+(.+?)\s*(?:name\s+is|as)\s+(.+)',
+            r'添加技能\s+(.+?)\s*(?:名称为|name\s+is|as)\s+(.+)',
+        ]
+        for pattern in name_patterns:
+            match = re.match(pattern, user_input_lower)
+            if match:
+                skill_path = match.group(1).strip()
+                skill_name = match.group(2).strip()
+                break
+
+        # 如果没有匹配到带名称的格式，尝试匹配不带名称的格式
+        if not skill_path:
+            install_patterns = [
+                r'安装技能\s+(.+)',
+                r'install\s+skill\s+(.+)',
+                r'添加技能\s+(.+)',
+            ]
+            for pattern in install_patterns:
+                match = re.match(pattern, user_input_lower)
+                if match:
+                    skill_path = match.group(1).strip()
+                    break
+
+        if not skill_path:
+            return None
+
+        # 检查路径是否存在
+        if not Path(skill_path).exists():
+            self.logger.warning(f"技能路径不存在: {skill_path}")
+            return None
+
+        self.logger.debug(f"检测到安装技能请求: {skill_path}, 新名称: {skill_name}")
+        return (skill_path, skill_name)
+
+    def cleanup_checkpoints(self, ttl_hours: int = 24) -> int:
+        """清理过期检查点
+
+        Args:
+            ttl_hours: 生存时间（小时）
+
+        Returns:
+            清理的检查点数量
+        """
+        return self.session_manager.cleanup_expired_checkpoints(ttl_hours)
+
+    def list_checkpoints(self):
+        """列出所有活跃检查点"""
+        checkpoints = self.session_manager.list_active_checkpoints()
+
+        if not checkpoints:
+            print("没有活跃的检查点")
+            return
+
+        print(f"活跃检查点列表（共{len(checkpoints)}个）：")
+        print("-" * 80)
+
+        for cp in checkpoints:
+            print(f"会话ID: {cp['session_id']}")
+            print(f"任务: {cp['task']}")
+            print(f"进度: {cp['current_step']}/{cp['total_steps']}")
+            print(f"状态: {cp['execution_status']}")
+            print(f"更新时间: {cp['updated_at']}")
+            print("-" * 80)
+
+    def clear_checkpoint(self, session_id: str):
+        """清除指定会话的检查点
+
+        Args:
+            session_id: 会话ID
+        """
+        self.session_manager.clear_checkpoint(session_id)
+        print(f"已清除会话 {session_id} 的检查点")
+
+    def get_checkpoint_status(self, session_id: str):
+        """获取检查点状态
+
+        Args:
+            session_id: 会话ID
+        """
+        status = self.session_manager.get_checkpoint_status(session_id)
+
+        if not status.get("has_checkpoint"):
+            print(f"会话 {session_id} 没有检查点")
+            return
+
+        print(f"会话 {session_id} 的检查点状态：")
+        print(f"任务: {status['task']}")
+        print(f"进度: {status['current_step']}/{status['total_steps']}")
+        print(f"状态: {status['execution_status']}")
+        print(f"重规划次数: {status['replan_count']}")
+        print(f"时间戳: {status['timestamp']}")
+        if status.get('error_info'):
+            print(f"错误信息: {status['error_info']}")
+
+    def list_skills(self):
+        """列出可用技能"""
+        skills = self.skill_caller.list_available_skills(enabled_only=True)
+
+        if not skills:
+            print("没有可用的技能")
+            return
+
+        print(f"可用技能列表（共{len(skills)}个）：")
+        print("-" * 80)
+
+        for skill in skills:
+            print(f"技能名称: {skill['name']}")
+            print(f"描述: {skill['description']}")
+            print(f"作者: {skill['author']}")
+            print(f"版本: {skill['version']}")
+            print("-" * 80)
+
+    def install_skill(self, skill_source: str, skill_name: str = None, overwrite: bool = False) -> bool:
+        """安装技能
+
+        Args:
+            skill_source: 技能源路径
+            skill_name: 可选的技能名称
+            overwrite: 是否覆盖已存在的技能目录
+
+        Returns:
+            是否安装成功
+        """
+        return self.skill_caller.builtin_skills.skill_loader.install_skill(
+            skill_source,
+            self.skill_caller.skill_registry,
+            skill_name,
+            overwrite
+        )
+
+    def get_context_stats(self, session_id: str = "default"):
+        """获取上下文统计信息
+
+        Args:
+            session_id: 会话ID
+        """
+        stats = self.session_manager.get_context_stats()
+
+        print(f"会话 {session_id} 的上下文统计：")
+        print(f"总消息数: {stats['total_messages']}")
+        print(f"总Token数: {stats['total_tokens']}")
+        print(f"最大Token数: {stats['max_tokens']}")
+        print(f"使用率: {stats['usage_ratio']:.1%}")
+        print(f"已压缩消息数: {stats['compressed_messages']}")
+        print(f"当前任务ID: {stats['current_task_id']}")
+
+    def compress_context(self, session_id: str = "default", strategy: str = None):
+        """手动触发上下文压缩
+
+        Args:
+            session_id: 会话ID
+            strategy: 压缩策略
+        """
+        stats = self.session_manager.compress_context(strategy)
+
+        print(f"上下文压缩完成：")
+        print(f"压缩前Token数: {stats['before_tokens']}")
+        print(f"压缩后Token数: {stats['after_tokens']}")
+        print(f"压缩比例: {stats['compression_ratio']:.1%}")
+
+        if stats.get("thinking_compressed"):
+            print(f"推理过程压缩: {stats['thinking_compressed']} 条")
+
+        if stats.get("tool_results_compressed"):
+            print(f"工具结果压缩: {stats['tool_results_compressed']} 条")
+
+        if stats.get("tasks_archived"):
+            print(f"任务归档: {stats['tasks_archived']} 个")
+
+        if stats.get("sliding_window_applied"):
+            print(f"滑动窗口已应用")
+
+    def retrieve_history(self, query: str, top_k: int = 5):
+        """检索相关历史记忆
+
+        Args:
+            query: 查询文本
+            top_k: 返回数量
+        """
+        results = self.session_manager.retrieve_relevant_history(query, top_k)
+
+        if not results:
+            print(f"没有找到与 '{query}' 相关的历史记录")
+            return
+
+        print(f"与 '{query}' 相关的历史记录（共{len(results)}条）：")
+        print("-" * 80)
+
+        for result in results:
+            print(f"任务ID: {result['task_id']}")
+            print(f"摘要: {result['summary']}")
+            if result['key_entities']:
+                print(f"关键实体: {', '.join(result['key_entities'])}")
+            print(f"访问次数: {result['access_count']}")
+            print("-" * 80)
+
+    def interactive_mode(self, session_id: str = "default"):
+        """交互式模式
+
+        Args:
+            session_id: 会话ID
+        """
+        print(f"欢迎使用{self.config.get('system', {}).get('name', '灵犀')}智能助手！")
+        print(f"版本: {self.config.get('system', {}).get('version', '0.2.0')}")
+        print("输入 'exit' 或 'quit' 退出系统")
+        print("输入 '/help' 查看帮助")
+        print("=" * 60)
+
+        while True:
+            try:
+                user_input = input("用户: ").strip()
+
+                if user_input.lower() in ["exit", "quit"]:
+                    print("再见！")
+                    break
+
+                if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    session_id = self._handle_command(user_input, session_id)
+                    continue
+
+                response = self.process_input(user_input, session_id)
+                print(f"灵犀: {response}")
+                print("=" * 60)
+
+            except KeyboardInterrupt:
+                print("\n再见！")
+                break
+            except Exception as e:
+                self.logger.error(f"交互模式错误: {e}")
+                print(f"错误: {e}")
+
+    def _handle_command(self, command: str, session_id: str) -> str:
+        """处理命令
+
+        Args:
+            command: 命令
+            session_id: 会话ID
+
+        Returns:
+            新的会话ID（如果切换了会话）
+        """
+        cmd_parts = command.split()
+        cmd = cmd_parts[0].lower()
+
+        if cmd == "/help":
+            print("可用命令：")
+            print("  /help - 显示帮助")
+            print("  /clear - 清空当前会话")
+            print("  /status - 显示检查点状态")
+            print("  /skills - 列出可用技能")
+            print("  /install <path> - 安装技能")
+            print("  /context-stats - 显示上下文统计")
+            print("  /compress - 手动触发上下文压缩")
+            print("  /search <query> - 检索相关历史")
+            print("  /session [id] - 创建新会话或切换到指定会话")
+            print("  /exit - 退出系统")
+
+        elif cmd == "/clear":
+            self.session_manager.clear_session(session_id)
+            print("会话已清空")
+
+        elif cmd == "/status":
+            self.get_checkpoint_status(session_id)
+
+        elif cmd == "/skills":
+            self.list_skills()
+
+        elif cmd == "/install":
+            if len(cmd_parts) < 2:
+                print("请提供技能源路径")
+                return session_id
+            skill_source = " ".join(cmd_parts[1:])
+            success = self.install_skill(skill_source)
+            if success:
+                print(f"技能安装成功: {skill_source}")
+            else:
+                print(f"技能安装失败: {skill_source}")
+
+        elif cmd == "/context-stats":
+            self.get_context_stats(session_id)
+
+        elif cmd == "/compress":
+            strategy = cmd_parts[1] if len(cmd_parts) > 1 else None
+            self.compress_context(session_id, strategy)
+
+        elif cmd == "/search":
+            if len(cmd_parts) < 2:
+                print("请提供查询文本")
+                return session_id
+            query = " ".join(cmd_parts[1:])
+            self.retrieve_history(query)
+
+        elif cmd == "/session":
+            if len(cmd_parts) > 1:
+                new_session_id = cmd_parts[1]
+                print(f"切换到会话: {new_session_id}")
+            else:
+                import uuid
+                new_session_id = f"session_{uuid.uuid4().hex[:8]}"
+                print(f"创建新会话: {new_session_id}")
+            return new_session_id
+
+        elif cmd == "/exit":
+            print("再见！")
+            sys.exit(0)
+
+        else:
+            print(f"未知命令: {cmd}")
+
+        return session_id
+
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description="灵犀智能助手")
+    parser.add_argument("--config", default="config.yaml", help="配置文件路径")
+    parser.add_argument("--session", default="default", help="会话ID")
+    parser.add_argument("--cleanup-checkpoints", action="store_true", help="清理过期检查点")
+    parser.add_argument("--list-checkpoints", action="store_true", help="列出活跃检查点")
+    parser.add_argument("--clear-checkpoint", help="清除指定会话的检查点")
+    parser.add_argument("--list-skills", action="store_true", help="列出可用技能")
+    parser.add_argument("--install-skill", help="安装技能（指定技能源目录路径）")
+    parser.add_argument("--skill-name", help="安装技能时指定新名称（可选）")
+    parser.add_argument("--overwrite", action="store_true", help="覆盖已存在的技能目录")
+
+    args = parser.parse_args()
+
+    assistant = LingxiAssistant(args.config)
+
+    if args.cleanup_checkpoints:
+        count = assistant.cleanup_checkpoints()
+        print(f"清理了 {count} 个过期检查点")
+        return
+
+    if args.list_checkpoints:
+        assistant.list_checkpoints()
+        return
+
+    if args.clear_checkpoint:
+        assistant.clear_checkpoint(args.clear_checkpoint)
+        return
+
+    if args.list_skills:
+        assistant.list_skills()
+        return
+
+    if args.install_skill:
+        success = assistant.install_skill(args.install_skill, args.skill_name, args.overwrite)
+        if success:
+            print("技能安装成功")
+        else:
+            print("技能安装失败")
+        return
+
+    assistant.interactive_mode(args.session)
+
+
+if __name__ == "__main__":
+    main()

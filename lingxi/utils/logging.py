@@ -1,0 +1,202 @@
+import os
+import logging
+import logging.handlers
+from typing import Dict, Any
+from lingxi.utils.log_filters import WebSocketDisconnectFilter, QuietExceptionFilter
+
+
+def setup_logging(config: Dict[str, Any] = None):
+    """设置日志
+    
+    Args:
+        config: 系统配置
+    """
+    if not config:
+        from lingxi.utils.config import get_config
+        config = get_config()
+    
+    # 获取日志配置
+    log_config = config.get("logging", {})
+    log_level = log_config.get("level", "INFO")
+    log_file = log_config.get("file_path", "logs/assistant.log")
+    log_format = log_config.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    # 确保日志目录存在
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # 创建日志格式化器
+    formatter = logging.Formatter(log_format)
+    
+    # 创建根日志记录器，设置为 DEBUG 级别以捕获所有日志
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    
+    # 清除现有处理器
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close()
+    
+    # 创建自定义过滤器
+    quiet_exception_filter = QuietExceptionFilter()
+    
+    # 创建控制台处理器（只输出 INFO 及以上级别）
+    import sys
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    console_handler.addFilter(quiet_exception_filter)
+    root_logger.addHandler(console_handler)
+    
+    # 创建主日志文件处理器（只输出 INFO 及以上级别）
+    try:
+        max_file_size = log_config.get("max_file_size_mb", 10) * 1024 * 1024
+        backup_count = log_config.get("backup_count", 5)
+        
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=max_file_size,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(formatter)
+        file_handler.addFilter(quiet_exception_filter)
+        root_logger.addHandler(file_handler)
+    except Exception as e:
+        # 如果创建文件处理器失败，只使用控制台处理器
+        root_logger.warning(f"创建日志文件处理器失败: {e}")
+    
+    # 创建 DEBUG 日志文件处理器（只输出 DEBUG 级别）
+    try:
+        debug_log_file = os.path.join(os.path.dirname(log_file), "debug.log")
+        debug_file_handler = logging.handlers.RotatingFileHandler(
+            debug_log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        debug_file_handler.setLevel(logging.DEBUG)
+        debug_file_handler.setFormatter(formatter)
+        root_logger.addHandler(debug_file_handler)
+    except Exception as e:
+        root_logger.warning(f"创建 DEBUG 日志文件处理器失败: {e}")
+    
+    # 配置第三方库日志
+    _configure_third_party_logs(config)
+    
+    root_logger.info("日志系统初始化完成")
+    root_logger.info(f"日志级别: {log_level}")
+    root_logger.info(f"日志文件: {log_file}")
+    root_logger.debug(f"DEBUG 日志文件: {os.path.join(os.path.dirname(log_file), 'debug.log')}")
+
+def _configure_third_party_logs(config: Dict[str, Any]):
+    """配置第三方库日志
+    
+    Args:
+        config: 系统配置
+    """
+    # 配置requests库日志
+    requests_logger = logging.getLogger("requests")
+    requests_logger.setLevel(logging.WARNING)
+    
+    # 配置urllib3库日志
+    urllib3_logger = logging.getLogger("urllib3")
+    urllib3_logger.setLevel(logging.WARNING)
+    
+    # 配置openai库日志
+    openai_logger = logging.getLogger("openai")
+    openai_logger.setLevel(logging.WARNING)
+    
+    # 配置flask库日志
+    flask_logger = logging.getLogger("flask")
+    flask_logger.setLevel(logging.WARNING)
+    
+    # 配置sqlalchemy库日志
+    sqlalchemy_logger = logging.getLogger("sqlalchemy")
+    sqlalchemy_logger.setLevel(logging.WARNING)
+
+def get_logger(name: str = None) -> logging.Logger:
+    """获取日志记录器
+    
+    Args:
+        name: 日志记录器名称
+        
+    Returns:
+        日志记录器实例
+    """
+    return logging.getLogger(name)
+
+def set_log_level(level: str):
+    """设置日志级别
+    
+    Args:
+        level: 日志级别
+    """
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
+
+def add_file_handler(log_file: str, level: str = "INFO", max_bytes: int = 10 * 1024 * 1024, backup_count: int = 5):
+    """添加文件处理器
+    
+    Args:
+        log_file: 日志文件路径
+        level: 日志级别
+        max_bytes: 最大文件大小
+        backup_count: 备份文件数量
+    """
+    # 确保日志目录存在
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # 创建文件处理器
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding='utf-8'
+    )
+    
+    # 设置日志级别和格式化器
+    file_handler.setLevel(level)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    
+    # 添加到根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+
+def remove_file_handler(log_file: str):
+    """移除文件处理器
+    
+    Args:
+        log_file: 日志文件路径
+    """
+    root_logger = logging.getLogger()
+    
+    for handler in root_logger.handlers[:]:
+        if hasattr(handler, "baseFilename") and handler.baseFilename == os.path.abspath(log_file):
+            root_logger.removeHandler(handler)
+            handler.close()
+            break
+
+if __name__ == "__main__":
+    # 测试日志设置
+    from lingxi.utils.config import load_config
+    
+    config = load_config()
+    setup_logging(config)
+    
+    logger = get_logger(__name__)
+    logger.debug("调试信息")
+    logger.info("信息")
+    logger.warning("警告")
+    logger.error("错误")
+    logger.critical("严重错误")
+    
+    print("日志测试完成")
