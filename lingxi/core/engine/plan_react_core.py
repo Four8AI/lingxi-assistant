@@ -87,11 +87,29 @@ class PlanReActCore(BaseEngine):
             execution_id: 执行ID
             plan: 计划步骤列表
         """
+        import threading
+        from lingxi.core.event import global_event_publisher
+        
+        # 获取 task_id
+        local_context = threading.local()
+        task_id = getattr(local_context, 'task_id', None)
+        
+        # 发布 thought_chain 事件
         global_event_publisher.publish(
             'thought_chain',
             session_id=session_id,
             execution_id=execution_id,
+            task_id=task_id,
             thoughts=[{"step": i+1, "description": step} for i, step in enumerate(plan)]
+        )
+        
+        # 发布 plan_final 事件
+        global_event_publisher.publish(
+            'plan_final',
+            session_id=session_id,
+            execution_id=execution_id,
+            task_id=task_id,
+            plan=[{"step": i+1, "description": step} for i, step in enumerate(plan)]
         )
 
     def _generate_plan_stream(self, task: str, task_info: Dict[str, Any], history_context: str,
@@ -132,17 +150,19 @@ class PlanReActCore(BaseEngine):
 历史上下文：
 {history_context}
 
-输出格式：
+
+请严格按照西门JSON格式输出：
 [
-  {{"step": 1, "description": "步骤1描述", "expected_tool": "工具ID或null"}},
-  {{"step": 2, "description": "步骤2描述", "expected_tool": "工具ID或null"}}
+  {{"step": 1, "description": "步骤1描述"}},
+  {{"step": 2, "description": "步骤2描述"}}
 ]
 
 步骤数量不超过{self.max_plan_steps}步。
 """
         response = self.llm_client.complete(prompt, task_level=task_level)
-        plan = parse_plan(response)
-        return [item["description"] for item in plan]
+        plan_steps = parse_plan(response)
+        self.logger.debug(f"生成Plan，共{len(plan_steps)}个步骤, 步骤详情: {plan_steps}")
+        return plan_steps
 
     def _generate_plan_with_stream(self, task: str, task_info: Dict[str, Any], history_context: str, 
                                  task_level: str, session_id: str, execution_id: str) -> Generator[Dict[str, Any], None, None]:
@@ -166,7 +186,7 @@ class PlanReActCore(BaseEngine):
 历史上下文：
 {history_context}
 
-输出格式：
+请严格按照JSON格式输出：
 [
   {{"step": 1, "description": "步骤1描述", "expected_tool": "工具ID或null"}},
   {{"step": 2, "description": "步骤2描述", "expected_tool": "工具ID或null"}}
@@ -187,10 +207,10 @@ class PlanReActCore(BaseEngine):
                         "is_partial": True
                     }
         
-        plan = parse_plan(full_response)
+        plan_steps = parse_plan(full_response)
         yield {
             "type": "plan",
-            "plan": [item["description"] for item in plan]
+            "plan": plan_steps
         }
 
     def _generate_plan_sync(self, task: str, task_info: Dict[str, Any], history_context: str,
@@ -230,43 +250,40 @@ class PlanReActCore(BaseEngine):
             流式响应生成器
         """
         history_context = self._build_history_context(history)
-        messages = [
-            {
-                "role": "system",
-                "content": [{
-                    "type": "text",
-                    "text": f"你是灵犀智能助手，使用ReAct模式解决问题。\n\n任务：{task}\n\n当前步骤：{step_idx + 1}. {step}\n\n已执行步骤：{[r.get('thought', '') for r in all_results]}\n\n请按照以下JSON格式输出：\n{{\"thought\": \"你的思考过程\", \"action\": \"行动名称\", \"action_input\": {{\"参数名\": \"参数值\"}}}}"
-                }]
-            }
-        ]
-
-        steps = []
-        for result in all_results:
-            if result.get('thought') and result.get('action'):
-                steps.append({
-                    "thought": result.get('thought'),
-                    "action": result.get('action'),
-                    "action_input": result.get('action_input'),
-                    "observation": result.get('observation')
-                })
-
-        self._build_step_messages(messages, steps)
+        
+        # 获取可用技能列表
+        available_skills = self.skill_caller.list_available_skills(enabled_only=True) if self.skill_caller else []
+        skills_list = PromptTemplates.format_skills_list(available_skills)
+        
+        # 获取系统信息
+        system_info = PromptTemplates.get_system_info()
+        
+        # 构建消息列表（支持缓存）
+        messages = PromptTemplates.build_plan_react_messages_with_cache(
+            task=task,
+            task_info=task_info,
+            history_context=history_context,
+            current_step=f"{step_idx + 1}. {step}",
+            skills_list=skills_list,
+            previous_results=all_results,
+            system_info=system_info
+        )
+        
         self.logger.debug(f"执行步骤 {step_idx + 1}: {step} (stream=True)")
 
         full_response = ""
         for response_chunk in self._process_llm_response(messages, task_level, stream=True):
-            if response_chunk["type"] == "thought_chunk":
-                content = response_chunk["content"]
+            if response_chunk.get("type") == "thought_chunk":
+                content = response_chunk.get("content", "")
                 full_response += content
-                self._publish_think_stream(session_id, execution_id, step_idx, content)
                 yield {
                     "type": "stream",
                     "step": step_idx,
                     "content": content,
                     "is_partial": True
                 }
-            elif response_chunk["type"] == "complete":
-                full_response = response_chunk["response"]
+            elif response_chunk.get("type") == "complete":
+                full_response = response_chunk.get("response", "")
                 break
 
         parsed = self._parse_response(full_response)
@@ -286,10 +303,18 @@ class PlanReActCore(BaseEngine):
             return
 
         if parsed.get("action") == "finish":
-            final_answer = parsed.get("thought", "") + " " + parsed.get("observation", "")
-            self._publish_task_end(session_id, execution_id, final_answer)
-            for chunk in self._handle_finish_action(parsed, steps):
-                yield chunk
+            # 不要在这里发布 task_end 事件，因为 _execute_steps 会处理
+            # 只需要生成 step_complete 事件，让 _execute_steps 处理任务完成
+            yield {
+                "type": "step_complete",
+                "step": step_idx,
+                "thought": parsed.get('thought'),
+                "action": parsed.get('action'),
+                "action_input": parsed.get('action_input'),
+                "observation": parsed.get('observation', ''),
+                "success": True
+            }
+            # 不需要调用 _handle_finish_action，因为 _execute_steps 会调用 _handle_task_completion
             return
 
         for chunk in self._handle_step_complete(parsed, step_idx):
@@ -312,11 +337,14 @@ class PlanReActCore(BaseEngine):
         Returns:
             流式响应生成器
         """
+        plan_chunk = None
         for chunk in self._generate_plan_stream(task, task_info, history_context, task_level, session_id, execution_id):
+            if chunk.get("type") == "plan":
+                plan_chunk = chunk
             yield chunk
 
-        if "plan" in chunk:
-            plan = chunk.get("plan", [])
+        if plan_chunk and "plan" in plan_chunk:
+            plan = plan_chunk.get("plan", [])
             if not plan:
                 yield {"type": "error", "message": "Plan生成失败，无法继续执行任务"}
                 return
@@ -361,10 +389,20 @@ class PlanReActCore(BaseEngine):
         initial_checkpoint = self._create_initial_checkpoint(task, plan)
         self._save_plan_checkpoint(session_id, initial_checkpoint)
 
-        steps_executor = self._execute_steps(plan, session_id, None, initial_checkpoint, task, task_info,
-                                           task_level=task_level, stream=False, execution_id=execution_id)
-        for step_chunk in steps_executor:
-            yield step_chunk
+        result = self._execute_steps(plan, session_id, None, initial_checkpoint, task, task_info,
+                                   task_level=task_level, stream=False, execution_id=execution_id)
+        
+        # 检查返回值类型
+        if isinstance(result, str):
+            # 如果是字符串，说明任务已完成或出错
+            yield {
+                "type": "finish",
+                "result": result
+            }
+        else:
+            # 如果是生成器，逐个yield
+            for step_chunk in result:
+                yield step_chunk
 
     def _execute_task_stream(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
                            session_id: str, execution_id: str, stream: bool) -> Generator[Dict[str, Any], None, None]:
@@ -384,28 +422,10 @@ class PlanReActCore(BaseEngine):
         task_level = task_info.get("level", "complex")
         history_context = self._build_history_context(history)
 
+        # 直接调用 _execute_plan_stream，它已经包含了完整的执行逻辑
+        # 不需要重复执行计划相关的步骤
         for chunk in self._execute_plan_stream(task, task_info, history_context, task_level, session_id, execution_id):
             yield chunk
-
-        if "plan" in chunk:
-            plan = chunk.get("plan", [])
-            if not plan:
-                yield {"type": "error", "message": "Plan生成失败，无法继续执行任务"}
-                return
-        else:
-            yield {"type": "error", "message": "Plan生成失败，无法继续执行任务"}
-            return
-
-        self._publish_plan_events(session_id, execution_id, plan)
-        self._add_plan_turn(session_id, plan, task_level)
-
-        initial_checkpoint = self._create_initial_checkpoint(task, plan)
-        self._save_plan_checkpoint(session_id, initial_checkpoint)
-
-        steps_executor = self._execute_steps(plan, session_id, None, initial_checkpoint, task, task_info,
-                                           task_level=task_level, stream=True, execution_id=execution_id)
-        for step_chunk in steps_executor:
-            yield step_chunk
 
     def _execute_task_sync(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
                           session_id: str, execution_id: str) -> Generator[Dict[str, Any], None, None]:
@@ -435,10 +455,20 @@ class PlanReActCore(BaseEngine):
         initial_checkpoint = self._create_initial_checkpoint(task, plan)
         self._save_plan_checkpoint(session_id, initial_checkpoint)
 
-        steps_executor = self._execute_steps(plan, session_id, None, initial_checkpoint, task, task_info,
-                                           task_level=task_level, stream=False, execution_id=execution_id)
-        for step_chunk in steps_executor:
-            yield step_chunk
+        result = self._execute_steps(plan, session_id, None, initial_checkpoint, task, task_info,
+                                   task_level=task_level, stream=False, execution_id=execution_id)
+        
+        # 检查返回值类型
+        if isinstance(result, str):
+            # 如果是字符串，说明任务已完成或出错
+            yield {
+                "type": "finish",
+                "result": result
+            }
+        else:
+            # 如果是生成器，逐个yield
+            for step_chunk in result:
+                yield step_chunk
 
     def _add_resume_turn(self, session_id: str, current_step_idx: int, total_steps: int, completed_steps: int):
         """添加恢复执行记录
@@ -570,7 +600,9 @@ class PlanReActCore(BaseEngine):
         Returns:
             流式响应生成器
         """
-        self.logger.error(f"步骤{step_idx + 1}执行失败: {step_result.get('error')}")
+        import traceback
+        error_trace = traceback.format_exc()
+        self.logger.error(f"步骤{step_idx + 1}执行失败: {step_result.get('error')}\n堆栈信息:\n{error_trace}")
 
         checkpoint["execution_status"] = "failed"
         checkpoint["error_info"] = step_result.get("error")

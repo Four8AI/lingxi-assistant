@@ -18,10 +18,7 @@
           <span class="message-time">{{ formatTime(turn.time || turn.timestamp) }}</span>
           <span v-if="turn.status" class="message-status" :class="turn.status">{{ turn.status === 'running' ? '执行中' : turn.status === 'completed' ? '已完成' : '失败' }}</span>
         </div>
-        <div v-if="turn.thought" class="message-thought">
-          <div class="thought-label">思考过程：</div>
-          <div class="thought-content">{{ turn.thought }}</div>
-        </div>
+
         <div v-if="turn.plan" class="message-plan">
           <div class="plan-label">执行计划：</div>
           <div class="plan-steps">
@@ -34,17 +31,30 @@
           <div class="steps-label">执行步骤：</div>
           <div class="steps-list">
             <div v-for="(step, index) in turn.steps" :key="index" class="step-item" :class="step.status">
-              <div class="step-header">
+              <div class="step-header" @click="toggleStepExpand(turn.id, index)">
                 <span class="step-index">{{ step.stepIndex + 1 }}.</span>
                 <span class="step-description">{{ step.description }}</span>
                 <span class="step-status">{{ step.status === 'running' ? '执行中' : step.status === 'completed' ? '已完成' : '失败' }}</span>
+                <span class="step-expand-icon">{{ isStepExpanded(turn.id, index) ? '▼' : '▶' }}</span>
               </div>
-              <div v-if="step.result" class="step-result">{{ step.result }}</div>
+              <transition name="step-collapse" mode="out-in">
+                <div v-if="isStepExpanded(turn.id, index)" class="step-content">
+                  <div v-if="step.thought" class="step-thought">
+                    <div class="thought-label">思考过程：</div>
+                    <div class="thought-content">{{ step.thought }}</div>
+                  </div>
+                  <div v-if="step.result" class="step-result">{{ step.result }}</div>
+                </div>
+              </transition>
             </div>
           </div>
         </div>
-        <div v-if="!turn.isStreaming" class="message-text-container">
-          <div class="message-text" v-html="renderMarkdown(turn.content)" />
+        <div v-if="!turn.isStreaming && !hasRunningSteps(turn)" class="message-text-container">
+          <div v-if="turn.role === 'assistant'" class="message-text-wrapper">
+            <h3 class="message-text-title">最终结果</h3>
+            <div class="message-text" v-html="renderMarkdown(turn.content)" />
+          </div>
+          <div v-else class="message-text" v-html="renderMarkdown(turn.content)" />
         </div>
         <div v-else class="message-text-container streaming">
           <div class="streaming-indicator">
@@ -75,6 +85,12 @@ import ThoughtChainPanel from './ThoughtChainPanel.vue'
 import StepInterventionCard from './StepInterventionCard.vue'
 import { marked } from 'marked'
 
+// 配置marked库
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
+
 const appStore = useAppStore()
 const { turns } = storeToRefs(appStore)
 
@@ -104,20 +120,24 @@ function renderMarkdown(content: any): string {
   if (typeof content === 'object' && content !== null) {
     // 提取最终结果部分
     if (content.final_result) {
-      return marked('# 最终结果\n\n' + content.final_result)
+      console.log('Rendering final_result:', content.final_result)
+      return marked.parse('# 最终结果\n\n' + content.final_result)
     } else if (content.result) {
-      return marked('# 最终结果\n\n' + content.result)
+      console.log('Rendering result:', content.result)
+      return marked.parse('# 最终结果\n\n' + content.result)
     } else if (content.content) {
       // 如果JSON中包含content字段，递归处理
       return renderMarkdown(content.content)
     } else {
       // 如果没有找到最终结果，显示提示信息
-      return marked('# 最终结果\n\n*暂无最终结果*')
+      return marked.parse('# 最终结果\n\n*暂无最终结果*')
     }
   }
   
   // 处理字符串格式的内容（Markdown）
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content)
+  
+  console.log('Rendering content:', contentStr)
   
   // 提取最终结果部分，只显示最终结果
   if (contentStr.includes('# 最终结果')) {
@@ -126,265 +146,15 @@ function renderMarkdown(content: any): string {
       const finalResult = parts[1].trim()
       // 如果最终结果部分为空，显示提示信息
       if (!finalResult) {
-        return marked('# 最终结果\n\n*暂无最终结果*')
+        return marked.parse('# 最终结果\n\n*暂无最终结果*')
       }
-      return marked('# 最终结果' + parts[1])
+      return marked.parse('# 最终结果' + parts[1])
     }
   }
   
-  return marked(contentStr)
+  return marked.parse(contentStr)
 }
 
-function hasThoughtChain(turn: any): boolean {
-  // 检查是否包含思考链内容
-  if (turn.thought) {
-    return true
-  }
-  if (turn.content) {
-    // 检查是否为JSON格式的思考链
-    if (typeof turn.content === 'object' && turn.content !== null) {
-      // 检查JSON对象是否包含思考链相关字段
-      return !!turn.content.thought_chain || !!turn.content.steps || 
-             !!turn.content.reasoning || !!turn.content.thought
-    }
-    
-    // 检查是否为字符串格式的思考链（Markdown）
-    const contentStr = typeof turn.content === 'string' ? turn.content : JSON.stringify(turn.content)
-    // 检查是否包含思考链标题
-    const hasThoughtChainTitle = contentStr.includes('# 思考链')
-    // 检查是否包含思考步骤
-    const hasThoughtSteps = contentStr.includes('## 步骤') || contentStr.includes('**思考**：')
-    console.log('hasThoughtChain check:', {
-      content: contentStr.substring(0, 200) + '...',
-      hasThoughtChainTitle,
-      hasThoughtSteps,
-      result: hasThoughtChainTitle || hasThoughtSteps
-    })
-    return hasThoughtChainTitle || hasThoughtSteps
-  }
-  return false
-}
-
-function buildThoughtChain(turn: any): any {
-  // 从 content 或 thought 中提取思考链数据
-  const steps: any[] = []
-  
-  // 优先从 turn.thought 中提取思考内容
-  if (turn.thought) {
-    steps.push({
-      type: 'execution',
-      content: '步骤 1',
-      thought: turn.thought,
-      action: '',
-      result: '',
-      status: 'completed'
-    })
-  } else if (turn.content && typeof turn.content === 'object' && turn.content !== null) {
-    console.log('buildThoughtChain JSON content:', turn.content)
-    
-    // 处理JSON格式的思考链
-    if (turn.content.thought_chain && turn.content.thought_chain.steps) {
-      // 直接使用JSON中的steps
-      steps.push(...turn.content.thought_chain.steps.map((step: any, index: number) => ({
-        type: step.type || 'execution',
-        content: step.content || `步骤 ${index + 1}`,
-        thought: step.thought || step.reasoning || '',
-        action: step.action || step.observation || '',
-        result: step.result || '',
-        status: step.status || 'completed'
-      })))
-    } else if (turn.content.steps) {
-      // 处理直接包含steps的JSON
-      steps.push(...turn.content.steps.map((step: any, index: number) => ({
-        type: step.type || 'execution',
-        content: step.content || `步骤 ${index + 1}`,
-        thought: step.thought || step.reasoning || '',
-        action: step.action || step.observation || '',
-        result: step.result || '',
-        status: step.status || 'completed'
-      })))
-    } else if (turn.content.thought || turn.content.reasoning) {
-      // 处理只有单个思考的情况
-      steps.push({
-        type: 'execution',
-        content: '步骤 1',
-        thought: turn.content.thought || turn.content.reasoning || '',
-        action: turn.content.action || turn.content.observation || '',
-        result: turn.content.result || '',
-        status: 'completed'
-      })
-    }
-  } else if (turn.content) {
-    // 处理字符串格式的思考链（Markdown或混合格式）
-    const contentStr = typeof turn.content === 'string' ? turn.content : JSON.stringify(turn.content)
-    console.log('buildThoughtChain content:', contentStr.substring(0, 500) + '...')
-    
-    // 只提取思考链部分，不包含最终结果
-    let thoughtChainContent = contentStr
-    if (contentStr.includes('# 最终结果')) {
-      thoughtChainContent = contentStr.split('# 最终结果')[0]
-    }
-    console.log('buildThoughtChain thoughtChainContent:', thoughtChainContent.substring(0, 500) + '...')
-    
-    // 检查是否包含JSON格式的思考链
-    // 尝试匹配单个完整的JSON对象
-    let remainingContent = thoughtChainContent
-    let jsonFound = false
-    
-    // 循环处理可能的多个JSON对象
-    while (remainingContent) {
-      // 找到第一个 { 的位置
-      const startIndex = remainingContent.indexOf('{')
-      if (startIndex === -1) break
-      
-      // 从 { 开始，尝试找到匹配的 }
-      let depth = 1
-      let endIndex = startIndex + 1
-      let foundEnd = false
-      
-      while (endIndex < remainingContent.length && depth > 0) {
-        const char = remainingContent[endIndex]
-        if (char === '{') {
-          depth++
-        } else if (char === '}') {
-          depth--
-          if (depth === 0) {
-            foundEnd = true
-            break
-          }
-        }
-        endIndex++
-      }
-      
-      if (foundEnd) {
-        const jsonStr = remainingContent.substring(startIndex, endIndex + 1)
-        console.log('Found JSON string:', jsonStr.substring(0, 200) + '...')
-        
-        try {
-          // 尝试解析JSON
-          const jsonContent = JSON.parse(jsonStr)
-          console.log('buildThoughtChain parsed JSON:', jsonContent)
-          
-          // 从JSON中提取思考链数据
-          if (jsonContent.thought || jsonContent.reasoning) {
-            // 处理单个思考步骤
-            steps.push({
-              type: 'execution',
-              content: `步骤 ${steps.length + 1}`,
-              thought: jsonContent.thought || jsonContent.reasoning || '',
-              action: jsonContent.action || jsonContent.observation || '',
-              result: jsonContent.result || '',
-              status: 'completed'
-            })
-            jsonFound = true
-          } else if (jsonContent.thought_chain && jsonContent.thought_chain.steps) {
-            // 处理包含steps的thought_chain
-            steps.push(...jsonContent.thought_chain.steps.map((step: any, index: number) => ({
-              type: step.type || 'execution',
-              content: step.content || `步骤 ${steps.length + index + 1}`,
-              thought: step.thought || step.reasoning || '',
-              action: step.action || step.observation || '',
-              result: step.result || '',
-              status: step.status || 'completed'
-            })))
-            jsonFound = true
-          } else if (jsonContent.steps) {
-            // 处理直接包含steps的JSON
-            steps.push(...jsonContent.steps.map((step: any, index: number) => ({
-              type: step.type || 'execution',
-              content: step.content || `步骤 ${steps.length + index + 1}`,
-              thought: step.thought || step.reasoning || '',
-              action: step.action || step.observation || '',
-              result: step.result || '',
-              status: step.status || 'completed'
-            })))
-            jsonFound = true
-          }
-          
-          // 继续处理剩余内容
-          remainingContent = remainingContent.substring(endIndex + 1).trim()
-        } catch (e) {
-          console.error('Failed to parse JSON:', e)
-          // JSON解析失败，继续处理剩余内容
-          remainingContent = remainingContent.substring(startIndex + 1).trim()
-        }
-      } else {
-        // 没有找到匹配的 }，退出循环
-        break
-      }
-    }
-    
-    console.log('JSON parsing complete. Steps found:', steps.length)
-    
-    // 如果JSON解析失败或没有找到JSON，尝试Markdown解析
-    if (steps.length === 0) {
-      const lines = thoughtChainContent.split('\n')
-      let currentStep: any = null
-      let inCodeBlock = false
-      let currentCode = ''
-      
-      lines.forEach(line => {
-        console.log('buildThoughtChain line:', line)
-        if (line.startsWith('```')) {
-          // 代码块开始或结束
-          inCodeBlock = !inCodeBlock
-          if (inCodeBlock) {
-            currentCode = ''
-          } else {
-            // 代码块结束，添加到当前步骤的action中
-            if (currentStep) {
-              currentStep.action += '\n```python\n' + currentCode + '\n```'
-            }
-          }
-        } else if (inCodeBlock) {
-          // 在代码块内，积累代码内容
-          currentCode += line + '\n'
-        } else if (line.startsWith('## 步骤 ')) {
-          // 新步骤开始
-          if (currentStep) {
-            steps.push(currentStep)
-          }
-          currentStep = {
-            type: 'execution',
-            content: line.replace('## ', ''),
-            thought: '',
-            action: '',
-            status: 'completed'
-          }
-          console.log('buildThoughtChain new step:', currentStep)
-        } else if (currentStep && line.startsWith('**思考**：')) {
-          currentStep.thought = line.replace('**思考**：', '')
-          console.log('buildThoughtChain thought:', currentStep.thought)
-        } else if (currentStep && line.startsWith('**执行**：')) {
-          // 提取执行内容，去掉开头的标记
-          let actionContent = line.replace('**执行**：', '')
-          // 如果后面还有内容，会在后续行中添加
-          currentStep.action = actionContent
-          console.log('buildThoughtChain action:', currentStep.action)
-        } else if (currentStep && currentStep.action && line && !line.startsWith('#') && !line.startsWith('## ')) {
-          // 非标题行，添加到当前步骤的action中
-          currentStep.action += '\n' + line
-          console.log('buildThoughtChain action append:', line)
-        } else if (currentStep && line.startsWith('**结果**：')) {
-          currentStep.result = line.replace('**结果**：', '')
-          console.log('buildThoughtChain result:', currentStep.result)
-        }
-      })
-      
-      if (currentStep) {
-        steps.push(currentStep)
-      }
-    }
-  }
-  
-  console.log('buildThoughtChain steps:', steps)
-  
-  return {
-    taskId: turn.id || turn.time?.toString(),
-    steps: steps,
-    status: 'completed'
-  }
-}
 
 function hasFailedSteps(turn: any): boolean {
   if (turn.status === 'failed') {
@@ -397,6 +167,16 @@ function hasFailedSteps(turn: any): boolean {
     return true
   }
   if (turn.error) {
+    return true
+  }
+  return false
+}
+
+function hasRunningSteps(turn: any): boolean {
+  if (turn.status === 'running') {
+    return true
+  }
+  if (turn.steps && turn.steps.some((s: any) => s.status === 'running')) {
     return true
   }
   return false
@@ -479,6 +259,58 @@ function handleSubmit(userInput: string) {
   console.log('Submit correction:', userInput)
   ElMessage.success('已提交修正内容')
 }
+
+// 步骤展开状态管理
+const expandedSteps = ref<Record<string, Record<number, boolean>>>({})
+
+function toggleStepExpand(turnId: string, stepIndex: number) {
+  if (!expandedSteps.value[turnId]) {
+    expandedSteps.value[turnId] = {}
+  }
+  expandedSteps.value[turnId][stepIndex] = !expandedSteps.value[turnId][stepIndex]
+}
+
+// 计算步骤的展开状态
+function isStepExpanded(turnId: string, stepIndex: number): boolean {
+  return expandedSteps.value[turnId]?.[stepIndex] || false
+}
+
+// 监听turns变化，处理步骤的自动折叠逻辑
+watch(turns, (newTurns) => {
+  newTurns.forEach(turn => {
+    if (turn.steps && turn.steps.length > 0) {
+      // 找到当前正在运行的步骤
+      const runningStepIndex = turn.steps.findIndex(step => step.status === 'running')
+      
+      if (runningStepIndex !== -1) {
+        // 自动展开当前运行的步骤
+        if (!expandedSteps.value[turn.id]) {
+          expandedSteps.value[turn.id] = {}
+        }
+        expandedSteps.value[turn.id][runningStepIndex] = true
+        
+        // 自动折叠其他步骤，添加100毫秒延时
+        setTimeout(() => {
+          turn.steps.forEach((step, index) => {
+            if (index !== runningStepIndex) {
+              expandedSteps.value[turn.id][index] = false
+            }
+          })
+        }, 100)
+      } else if (turn.status === 'completed' && turn.steps.length > 0) {
+        // 任务完成时，折叠所有步骤，添加100毫秒延时
+        setTimeout(() => {
+          if (!expandedSteps.value[turn.id]) {
+            expandedSteps.value[turn.id] = {}
+          }
+          turn.steps.forEach((step, index) => {
+            expandedSteps.value[turn.id][index] = false
+          })
+        }, 100)
+      }
+    }
+  })
+}, { deep: true })
 </script>
 
 <style scoped lang="scss">
@@ -574,6 +406,26 @@ function handleSubmit(userInput: string) {
   }
 }
 
+.step-thought {
+  background-color: rgba(245, 245, 245, 0.8);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+
+  .thought-label {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #666;
+    font-size: 13px;
+  }
+
+  .thought-content {
+    line-height: 1.4;
+    color: #333;
+    font-size: 13px;
+  }
+}
+
 .message-plan {
   background-color: #f0f5ff;
   border-radius: 8px;
@@ -630,6 +482,7 @@ function handleSubmit(userInput: string) {
         display: flex;
         align-items: center;
         margin-bottom: 4px;
+        cursor: pointer;
 
         .step-index {
           font-weight: 600;
@@ -644,6 +497,7 @@ function handleSubmit(userInput: string) {
           font-size: 12px;
           padding: 2px 6px;
           border-radius: 8px;
+          margin-right: 8px;
 
           &.running {
             background-color: #1890ff;
@@ -660,6 +514,35 @@ function handleSubmit(userInput: string) {
             color: white;
           }
         }
+
+        .step-expand-icon {
+          font-size: 12px;
+          color: #999;
+          transition: transform 0.2s;
+        }
+      }
+
+      .step-content {
+        margin-top: 8px;
+        padding-left: 24px;
+        overflow: hidden;
+      }
+
+      .step-collapse-enter-active,
+      .step-collapse-leave-active {
+        transition: opacity 0.3s ease, max-height 0.3s ease, margin-top 0.3s ease;
+      }
+
+      .step-collapse-enter-from {
+        opacity: 0;
+        max-height: 0;
+        margin-top: 0;
+      }
+
+      .step-collapse-leave-to {
+        opacity: 0;
+        max-height: 0;
+        margin-top: 0;
       }
 
       .step-result {
@@ -705,6 +588,33 @@ function handleSubmit(userInput: string) {
   }
 }
 
+.message-text-wrapper {
+  background-color: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 8px;
+
+  .user & {
+    background-color: #f0f7ff;
+    border-color: #d6e4ff;
+  }
+
+  .message-text-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #333;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 8px;
+
+    .user & {
+      color: #1890ff;
+      border-bottom-color: #d6e4ff;
+    }
+  }
+}
+
 .streaming-indicator {
   display: flex;
   align-items: center;
@@ -731,8 +641,17 @@ function handleSubmit(userInput: string) {
   line-height: 1.6;
   color: $text-primary;
   word-wrap: break-word;
-  display: inline-block;
+  display: block;
   text-align: left;
+
+  ::marker {
+    unicode-bidi: isolate;
+    font-variant-numeric: tabular-nums;
+    text-transform: none;
+    text-indent: 0px !important;
+    text-align: start !important;
+    text-align-last: start !important;
+  }
 
   h1, h2, h3, h4, h5, h6 {
     margin: 16px 0 8px 0;

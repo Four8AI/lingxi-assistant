@@ -4,6 +4,7 @@
 """
 import sys
 import os
+import argparse
 from pathlib import Path
 
 project_root = Path(__file__).parent
@@ -15,6 +16,10 @@ from lingxi.utils.config import get_config
 
 def main():
     """启动WebSocket服务器"""
+    parser = argparse.ArgumentParser(description="灵犀智能助手 - WebSocket服务器")
+    parser.add_argument("--reload", action="store_true", help="启用自动重载（开发模式）")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("灵犀智能助手 - WebSocket服务器")
     print("=" * 60)
@@ -24,6 +29,12 @@ def main():
     web_config = config.get('web', {})
     host = web_config.get('host', 'localhost')
     port = web_config.get('port', 5000)
+
+    # 如果命令行参数指定了reload，覆盖配置文件中的设置
+    if args.reload:
+        web_config['debug'] = True
+        print("开发模式已启用：文件修改后会自动重载")
+        print()
 
     print(f"服务器地址: http://{host}:{port}")
     print(f"WebSocket端点: ws://{host}:{port}/ws")

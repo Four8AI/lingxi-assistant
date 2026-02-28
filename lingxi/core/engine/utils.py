@@ -14,53 +14,82 @@ def parse_llm_response(response: str) -> Optional[Dict[str, Any]]:
     Returns:
         解析后的字典
     """
-    # 优先尝试 JSON 格式解析
+    # 移除Markdown代码块标记
+    response = response.strip()
+    if response.startswith('```'):
+        # 匹配 ```json 或 ```python 等标记
+        response = re.sub(r'^```[a-zA-Z]*\n', '', response)
+        response = re.sub(r'\n```$', '', response)
+        response = response.strip()
+    
+    # 移除可能的单引号或双引号包围
+    # 处理可能的转义引号
+    import re
+    # 移除字符串两端的引号（包括可能的转义）
+    response = re.sub(r'^[\"\']+(.*?)[\"\']+$', r'\1', response)
+    
+    # 优先尝试直接 JSON 解析（更可靠）
     try:
-        # 查找 JSON 对象（支持嵌套和换行）
-        start_idx = response.find('{')
-        if start_idx != -1:
-            # 从第一个 { 开始，寻找匹配的 }
-            brace_count = 0
-            in_string = False
-            escape_next = False
-            for i in range(start_idx, len(response)):
-                char = response[i]
-                
-                if escape_next:
-                    escape_next = False
-                    continue
-                
-                if char == '\\':
-                    escape_next = True
-                    continue
-                
-                if char == '"':
-                    in_string = not in_string
-                    continue
-                
-                if not in_string:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            json_str = response[start_idx:i+1]
-                            result = json.loads(json_str)
-                            
-                            # 验证必需字段
-                            if all(key in result for key in ["thought", "action", "action_input"]):
-                                # action_input 可以是对象或字符串
-                                action_input = result["action_input"]
-                                content = action_input if result["action"] == "finish" else ""
-                                return {
-                                    "thought": result["thought"],
-                                    "action": result["action"],
-                                    "action_input": action_input,
-                                    "content": content
-                                }
-                            break
-    except (json.JSONDecodeError, KeyError, AttributeError, IndexError):
-        pass
+        result = json.loads(response)
+        # 验证必需字段
+        if all(key in result for key in ["thought", "action", "action_input"]):
+            # action_input 可以是对象或字符串
+            action_input = result["action_input"]
+            content = action_input if result["action"] == "finish" else ""
+            return {
+                "thought": result["thought"],
+                "action": result["action"],
+                "action_input": action_input,
+                "content": content
+            }
+    except (json.JSONDecodeError, KeyError, AttributeError, IndexError) as e:
+        # 直接解析失败，尝试寻找 JSON 对象
+        try:
+            # 查找 JSON 对象（支持嵌套和换行）
+            start_idx = response.find('{')
+            if start_idx != -1:
+                # 从第一个 { 开始，寻找匹配的 }
+                brace_count = 0
+                in_string = False
+                escape_next = False
+                for i in range(start_idx, len(response)):
+                    char = response[i]
+                    
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    
+                    if char == '\\':
+                        escape_next = True
+                        continue
+                    
+                    if char == '"':
+                        in_string = not in_string
+                        continue
+                    
+                    if not in_string:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_str = response[start_idx:i+1]
+                                result = json.loads(json_str)
+                                
+                                # 验证必需字段
+                                if all(key in result for key in ["thought", "action", "action_input"]):
+                                    # action_input 可以是对象或字符串
+                                    action_input = result["action_input"]
+                                    content = action_input if result["action"] == "finish" else ""
+                                    return {
+                                        "thought": result["thought"],
+                                        "action": result["action"],
+                                        "action_input": action_input,
+                                        "content": content
+                                    }
+                                break
+        except (json.JSONDecodeError, KeyError, AttributeError, IndexError) as e:
+            pass
     
     # 回退到文本格式解析（支持中英文冒号）
     thought_match = re.search(r'思考[：:]\s*(.*?)\n行动[：:]', response, re.DOTALL)
@@ -184,6 +213,41 @@ def parse_plan(plan: str, max_steps: int = 8) -> List[str]:
     Returns:
         规划步骤列表
     """
+    # 添加调试日志
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"解析计划，原始内容: {repr(plan[:500])}")
+    
+    # 首先尝试解析JSON格式
+    try:
+        import json
+        plan = plan.strip()
+        
+        # 移除Markdown代码块标记
+        if plan.startswith('```'):
+            # 匹配 ```json 或 ```python 等标记
+            plan = re.sub(r'^```[a-zA-Z]*\n', '', plan)
+            plan = re.sub(r'\n```$', '', plan)
+            plan = plan.strip()
+        
+        if plan.startswith('[') or plan.startswith('{'):
+            plan_data = json.loads(plan)
+            if isinstance(plan_data, list):
+                steps = []
+                for item in plan_data:
+                    if isinstance(item, dict):
+                        if 'description' in item:
+                            steps.append(item['description'])
+                        elif 'step' in item:
+                            steps.append(item.get('description', f"步骤 {item['step']}"))
+                if steps:
+                    logger.debug(f"JSON解析成功，提取到{len(steps)}个步骤")
+                    return steps[:max_steps]
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON解析失败: {e}")
+        pass
+    
+    # 如果JSON解析失败，尝试文本格式解析
     steps = []
     lines = plan.split("\n")
 
@@ -228,8 +292,11 @@ def parse_plan(plan: str, max_steps: int = 8) -> List[str]:
                     
                     if step_content:
                         steps.append(step_content)
+    
+    logger.debug(f"文本解析结果，提取到{len(steps)}个步骤: {steps}")
 
     if not steps:
+        logger.error(f"任务规划为空，原始内容: {repr(plan)}")
         raise ValueError("任务规划为空")
 
     return steps[:max_steps]

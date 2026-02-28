@@ -1,6 +1,8 @@
 import logging
 import time
 import json
+import uuid
+import threading
 from typing import Dict, List, Optional, Any, Union, Generator
 from lingxi.core.llm_client import LLMClient
 from lingxi.core.skill_caller import SkillCaller
@@ -8,6 +10,10 @@ from lingxi.core.prompts import PromptTemplates
 from lingxi.core.event import global_event_publisher
 from .utils import parse_llm_response, parse_action_parameters, process_parameters, calculate_expression
 from lingxi.utils.json_parser import stream_with_thought_only
+
+
+# 创建线程局部存储
+local_context = threading.local()
 
 
 class BaseEngine:
@@ -85,7 +91,7 @@ class BaseEngine:
         if parsed:
             self.logger.debug(f"解析成功: thought={parsed['thought'][:30]}..., action={parsed['action']}")
         else:
-            self.logger.warning("解析失败")
+            self.logger.warning(f"解析失败，响应内容: {repr(response)}")
         return parsed
 
     def _execute_action(self, action: str, action_input: Any) -> str:
@@ -209,35 +215,24 @@ class BaseEngine:
             stream_response = self.llm_client.stream_complete(prompt, task_level=task_level)
             
             # 收集流式响应
+
             full_response = ""
             for chunk in stream_response:
                 if hasattr(chunk, 'choices') and chunk.choices:
                     delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
+                    if hasattr(delta, "reasoning_content") and delta.reasoning_content is not None:
+                        self.logger.debug("思考内容1: %s", delta.reasoning_content)
+                        self._publish_think_stream(session_id, execution_id, step_idx, delta.reasoning_content)
+                    if hasattr(delta, "content") and delta.content is not None:
                         full_response += delta.content
-                        # 发布思考流式输出事件
-                        global_event_publisher.publish(
-                            'think_stream',
-                            session_id="default",
-                            execution_id=f"engine_{int(time.time())}",
-                            step_index=-1,  # -1 表示最终响应
-                            body={"reasoning_content": delta.content},
-                            is_partial=True
-                        )
-                        # 生成流式输出
-                        yield {
-                            "type": "stream",
-                            "content": delta.content,
-                            "is_partial": True
-                        }
-            
-            self.logger.debug("最终响应LLM响应: %s", full_response)
-            
+                        yield {"type": "stream", "content": delta.content}
+
             # 发布最终响应完成事件
             yield {
                 "type": "finish",
                 "result": full_response
             }
+            self.logger.debug("最终响应LLM响应: %s", full_response)
         
         return stream_generator()
 
@@ -269,16 +264,25 @@ class BaseEngine:
 {executed_steps}
 现在请输出下一步:"""
 
-        if len(messages) == 2:
+        # 保留system消息中的信息，添加user消息
+        if len(messages) == 1:
             messages.append({
                 "role": "user",
                 "content": [PromptTemplates.build_cached_text_content(steps_part, enable_cache=False)]
             })
-        else:
+        elif len(messages) >= 2:
             messages[-1] = {
                 "role": "user",
                 "content": [PromptTemplates.build_cached_text_content(steps_part, enable_cache=False)]
             }
+        
+        # 添加调试日志
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"构建步骤消息，消息数量: {len(messages)}")
+        for i, msg in enumerate(messages):
+            logger.debug(f"消息 {i}: role={msg['role']}, content={repr(str(msg['content'])[:200])}")
+        
         return messages
 
     def _get_json_schema(self) -> Dict[str, Any]:
@@ -348,7 +352,7 @@ class BaseEngine:
             total_steps=total_steps
         )
 
-    def _publish_step_end(self, session_id: str, execution_id: str, step_idx: int, status: str, error: str = None, result: str = ""):
+    def _publish_step_end(self, session_id: str, execution_id: str, step_idx: int, status: str, error: str = None, result: str = "", thought: str = ""):
         """发布步骤结束事件
 
         Args:
@@ -359,14 +363,17 @@ class BaseEngine:
             error: 错误信息
             result: 结果
         """
+        task_id = getattr(local_context, 'task_id', None)
         global_event_publisher.publish(
             'step_end',
             session_id=session_id,
             execution_id=execution_id,
+            task_id=task_id,
             step_index=step_idx,
             status=status,
             error=error,
-            result=result
+            result=result,
+            thought=thought
         )
 
     def _publish_task_end(self, session_id: str, execution_id: str, result: str):
@@ -377,12 +384,19 @@ class BaseEngine:
             execution_id: 执行ID
             result: 结果
         """
+        task_id = getattr(local_context, 'task_id', None)
         global_event_publisher.publish(
             'task_end',
             session_id=session_id,
             execution_id=execution_id,
+            task_id=task_id,
             result=result
         )
+        # 返回task_end事件
+        return {
+            "type": "task_end",
+            "result": result
+        }
 
     def _process_llm_response(self, messages: List[Dict[str, Any]], task_level: str, stream: bool) -> Generator[Dict[str, Any], None, None]:
         """处理LLM响应
@@ -395,6 +409,11 @@ class BaseEngine:
         Returns:
             流式响应生成器
         """
+        # 添加调试日志
+        self.logger.debug(f"处理LLM响应，消息数量: {len(messages)}")
+        for i, msg in enumerate(messages):
+            self.logger.debug(f"消息 {i}: role={msg['role']}, content={repr(str(msg['content'])[:200])}")
+        
         json_schema = self._get_json_schema()
 
         if stream:
@@ -405,19 +424,29 @@ class BaseEngine:
             )
 
             full_response = ""
-            for thought_chunk in stream_with_thought_only(stream_response):
-                if thought_chunk["type"] == "thought":
-                    content = thought_chunk["content"]
-                    full_response += content
-                    yield {
-                        "type": "thought_chunk",
-                        "content": content
-                    }
-                elif thought_chunk["type"] == "complete":
-                    yield {
-                        "type": "complete",
-                        "response": json.dumps(thought_chunk["content"])
-                    }
+            last_thought = ""
+            for chunk in stream_response:
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        content = delta.content
+                        full_response += content
+                        # 尝试提取thought字段
+                        from lingxi.utils.json_parser import extract_partial_json_field
+                        thought = extract_partial_json_field(full_response, "thought")
+                        if thought and thought != last_thought:
+                            # 只输出增量的thought内容
+                            incremental_thought = thought[len(last_thought):] if last_thought else thought
+                            yield {
+                                "type": "thought_chunk",
+                                "content": incremental_thought
+                            }
+                            last_thought = thought
+            
+            yield {
+                "type": "complete",
+                "response": full_response
+            }
         else:
             response = self.llm_client.chat_complete_with_cache(messages, task_level=task_level)
             yield {
@@ -466,7 +495,8 @@ class BaseEngine:
             "thought": parsed.get('thought'),
             "action": parsed.get('action'),
             "action_input": parsed.get('action_input'),
-            "observation": observation
+            "observation": observation,
+            "success": True
         }
 
     def _execute_task_stream(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
@@ -518,13 +548,18 @@ class BaseEngine:
         """
         try:
             self.logger.debug(f"开始执行新任务：{task} (stream={stream})")
-
+            task_id = f"task_{session_id}_{uuid.uuid4().hex[:8]}"
+            local_context.task_id = task_id
+            self.logger.debug(f"生成任务ID：{task_id}")
             execution_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
-
+            local_context.execution_id = execution_id
+            local_context.session_id = session_id
+            self.logger.debug(f"生成执行ID：{execution_id}")
             global_event_publisher.publish(
                 'task_start',
                 session_id=session_id,
                 execution_id=execution_id,
+                task_id=task_id,
                 task_info=task_info,
                 user_input=task
             )
@@ -555,12 +590,13 @@ class BaseEngine:
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
-            self.logger.error(f"执行新任务时发生异常: {e}\n{error_trace}")
+            error_message = str(e)
+            self.logger.error(f"执行新任务时发生异常: {error_message}\n{error_trace}")
             if stream:
                 def error_generator():
-                    yield {"type": "error", "message": f"{str(e)}\n堆栈信息:\n{error_trace}"}
+                    yield {"type": "error", "message": f"{error_message}\n堆栈信息:\n{error_trace}"}
                 return error_generator()
-            return self._generate_error_response(task, -1, f"{str(e)}\n堆栈信息:\n{error_trace}")
+            return self._generate_error_response(task, -1, f"{error_message}\n堆栈信息:\n{error_trace}")
 
     def _handle_task_completion(self, checkpoint: Dict[str, Any], session_id: str, execution_id: str, 
                               task: str, all_results: List[Dict[str, Any]], task_level: str) -> Generator[Dict[str, Any], None, None]:
@@ -582,7 +618,19 @@ class BaseEngine:
         if hasattr(self, "_save_plan_checkpoint"):
             self._save_plan_checkpoint(session_id, checkpoint)
 
-        final_response = self._generate_final_response(task, all_results, task_level)
+        # 检查最后一个步骤是否是 finish 动作
+        final_response = ""
+        if all_results and all_results[-1].get("action") == "finish":
+            # 如果最后一个步骤是 finish，直接使用 finish 的内容
+            finish_step = all_results[-1]
+            final_response = finish_step.get("action_input", "")
+            if not final_response:
+                # 如果 action_input 为空，尝试使用 thought 和 observation
+                final_response = finish_step.get("thought", "") + " " + finish_step.get("observation", "")
+        else:
+            # 否则调用模型生成最终响应
+            final_response = self._generate_final_response(task, all_results, task_level)
+
         self._publish_task_end(session_id, execution_id, final_response)
 
         yield {

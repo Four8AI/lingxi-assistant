@@ -83,7 +83,7 @@ def execute(parameters: Dict[str, Any]) -> str:
     # 修复过度转义的路径
     command = _fix_over_escaped_paths(command)
 
-    logger.info(f"执行命令: {command}")
+    logger.debug(f"执行命令: {command}")
 
     try:
         if shell_type is None:
@@ -96,55 +96,108 @@ def execute(parameters: Dict[str, Any]) -> str:
         if shell_type == "powershell":
             encoding = locale.getpreferredencoding() or 'gbk'
             
-            # 使用临时文件来避免转义问题
-            # 使用 UTF-8 BOM 编码以确保 PowerShell 正确识别中文
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', encoding='utf-8-sig', delete=False) as f:
-                # 设置输出编码为 UTF-8
-                f.write('[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n')
-                f.write('$OutputEncoding = [System.Text.Encoding]::UTF8\n')
-                f.write('[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n')
-                f.write('chcp 65001 | Out-Null\n')
-                f.write(command)
-                f.write('\n')
-                f.write('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n')
-                f.write('if ($error.Count -gt 0) { exit 1 }\n')
-                temp_file = f.name
-            
-            try:
-                process = subprocess.Popen(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", temp_file],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=cwd
-                )
-                stdout_bytes, stderr_bytes = process.communicate(timeout=30)
+            # 检查是否是 Python 代码（以 python -c 开头）
+            python_match = re.match(r'^python\s+-c\s+(["\'])(.*?)\1\s*$', command, re.DOTALL)
+            if python_match:
+                quote_char = python_match.group(1)
+                python_code = python_match.group(2)
                 
-                # 尝试用 UTF-8 解码，如果失败则用 GBK
+                # 将 Python 代码写入临时文件
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', encoding='utf-8', delete=False) as f:
+                    f.write(python_code)
+                    temp_python_file = f.name
+                
                 try:
-                    stdout = stdout_bytes.decode('utf-8')
-                    stderr = stderr_bytes.decode('utf-8')
-                except UnicodeDecodeError:
-                    stdout = stdout_bytes.decode('gbk', errors='replace')
-                    stderr = stderr_bytes.decode('gbk', errors='replace')
+                    # 执行临时 Python 文件
+                    process = subprocess.Popen(
+                        ["python", temp_python_file],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=cwd
+                    )
+                    stdout_bytes, stderr_bytes = process.communicate(timeout=30)
+                    
+                    # 尝试用 UTF-8 解码，如果失败则用 GBK
+                    try:
+                        stdout = stdout_bytes.decode('utf-8')
+                        stderr = stderr_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        stdout = stdout_bytes.decode('gbk', errors='replace')
+                        stderr = stderr_bytes.decode('gbk', errors='replace')
+                    
+                    # 合并 stdout 和 stderr 以便检查错误
+                    full_output = stdout + stderr
+                    
+                    # 检查输出中是否包含 Python 错误信息
+                    python_error_indicators = ['ModuleNotFoundError', 'ImportError', 'SyntaxError', 'NameError', 'Traceback', 'File "<string>"']
+                    if any(indicator in full_output for indicator in python_error_indicators):
+                        # 如果输出中包含 Python 错误信息，即使返回码为0也视为失败
+                        return f"命令执行失败 (检测到错误):\n\n{full_output}"
+                    
+                    # 检查是否有 stderr 输出
+                    if stderr.strip():
+                        return f"命令执行失败 (检测到错误输出):\n\n{full_output}"
+                    
+                    if process.returncode == 0:
+                        return f"命令执行成功:\n\n{stdout}"
+                    else:
+                        return f"命令执行失败 (返回码: {process.returncode}):\n\n{stderr}"
+                finally:
+                    # 清理临时文件
+                    try:
+                        os.unlink(temp_python_file)
+                    except:
+                        pass
+            else:
+                # 使用临时文件来避免转义问题
+                # 使用 UTF-8 BOM 编码以确保 PowerShell 正确识别中文
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', encoding='utf-8-sig', delete=False) as f:
+                    # 设置输出编码为 UTF-8
+                    f.write('[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n')
+                    f.write('$OutputEncoding = [System.Text.Encoding]::UTF8\n')
+                    f.write('[Console]::InputEncoding = [System.Text.Encoding]::UTF8\n')
+                    f.write('chcp 65001 | Out-Null\n')
+                    f.write(command)
+                    f.write('\n')
+                    f.write('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n')
+                    f.write('if ($error.Count -gt 0) { exit 1 }\n')
+                    temp_file = f.name
                 
-                # 合并 stdout 和 stderr 以便检查错误
-                full_output = stdout + stderr
-                
-                # 检查输出中是否包含 Python 错误信息
-                python_error_indicators = ['ModuleNotFoundError', 'ImportError', 'SyntaxError', 'NameError', 'Traceback', 'File "<string>"']
-                if any(indicator in full_output for indicator in python_error_indicators):
-                    # 如果输出中包含 Python 错误信息，即使返回码为0也视为失败
-                    return f"命令执行失败 (检测到错误):\n\n{full_output}"
-                
-                # 检查是否有 stderr 输出
-                if stderr.strip():
-                    return f"命令执行失败 (检测到错误输出):\n\n{full_output}"
-            finally:
-                # 清理临时文件
                 try:
-                    os.unlink(temp_file)
-                except:
-                    pass
+                    process = subprocess.Popen(
+                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", temp_file],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=cwd
+                    )
+                    stdout_bytes, stderr_bytes = process.communicate(timeout=30)
+                    
+                    # 尝试用 UTF-8 解码，如果失败则用 GBK
+                    try:
+                        stdout = stdout_bytes.decode('utf-8')
+                        stderr = stderr_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        stdout = stdout_bytes.decode('gbk', errors='replace')
+                        stderr = stderr_bytes.decode('gbk', errors='replace')
+                    
+                    # 合并 stdout 和 stderr 以便检查错误
+                    full_output = stdout + stderr
+                    
+                    # 检查输出中是否包含 Python 错误信息
+                    python_error_indicators = ['ModuleNotFoundError', 'ImportError', 'SyntaxError', 'NameError', 'Traceback', 'File "<string>"']
+                    if any(indicator in full_output for indicator in python_error_indicators):
+                        # 如果输出中包含 Python 错误信息，即使返回码为0也视为失败
+                        return f"命令执行失败 (检测到错误):\n\n{full_output}"
+                    
+                    # 检查是否有 stderr 输出
+                    if stderr.strip():
+                        return f"命令执行失败 (检测到错误输出):\n\n{full_output}"
+                finally:
+                    # 清理临时文件
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass
         else:
             process = subprocess.Popen(
                 ["bash", "-c", command],

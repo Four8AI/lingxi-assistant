@@ -94,20 +94,62 @@ async function handleSelectSession(sessionId: string) {
     console.log('Calling getSessionHistory for sessionId:', sessionId)
     const history = await window.electronAPI.api.getSessionHistory(sessionId)
     console.log('Received history:', history)
+    
     // 转换后端返回的历史记录格式为前端期望的格式
-    const turns = history.history.map((item: any, index: number) => ({
-      id: `${sessionId}_${index}`,
-      role: item.role,
-      content: item.content,
-      time: item.time || Date.now(),
-      timestamp: item.time || Date.now(),
-      metadata: item.metadata,
-      thought: item.thought,
-      observation: item.observation,
-      skill_calls: item.skill_calls,
-      steps: item.steps,
-      thought_chain: item.thought_chain
-    }))
+    const turns = history.history.map((item: any, index: number) => {
+      // 如果content中包含步骤和思考信息，解析它们
+      let steps = item.steps || []
+      let thought = item.thought || ''
+      
+      if (item.content && typeof item.content === 'string') {
+        // 尝试从content中解析步骤和思考信息
+        const content = item.content
+        
+        // 检查是否包含"## 步骤"标记
+        if (content.includes('## 步骤')) {
+          const stepRegex = /## 步骤 \d+：思考\s*\*\*思考\*\*：([\s\S]*?)\s*\*\*执行\*\*：([\s\S]*?)(?=## 步骤|# 最终结果|$)/g
+          const matches = [...content.matchAll(stepRegex)]
+          
+          if (matches.length > 0) {
+            steps = matches.map((match, i) => ({
+              stepIndex: i,
+              description: `步骤 ${i + 1}`,
+              status: 'completed',
+              thought: match[1].trim(),
+              result: match[2].trim()
+            }))
+          }
+        }
+        
+        // 检查是否包含思考链信息
+        if (content.includes('# 思考链')) {
+          const thoughtChainMatch = content.match(/# 思考链\s*\n\n([\s\S]*?)(?=# 最终结果|$)/)
+          if (thoughtChainMatch) {
+            thought = thoughtChainMatch[1].trim()
+          }
+        }
+      }
+      
+      return {
+        id: `${sessionId}_${index}`,
+        role: item.role,
+        content: item.content,
+        time: item.time || Date.now(),
+        timestamp: item.time || Date.now(),
+        metadata: item.metadata,
+        thought: thought,
+        observation: item.observation,
+        skill_calls: item.skill_calls,
+        steps: steps,
+        thought_chain: item.thought_chain || null,
+        plan: item.plan || null,
+        executionId: item.executionId || null,
+        status: item.status || null,
+        isThinking: item.isThinking || false,
+        isStreaming: item.isStreaming || false
+      }
+    })
+    
     console.log('Converted turns:', turns)
     appStore.setTurns(turns)
     console.log('Set turns in appStore:', appStore.turns)

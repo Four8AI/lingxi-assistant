@@ -1,134 +1,139 @@
 ---
 name: xlsx
-description: "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas"
-version: "1.0.0"
-trigger_conditions: "用户请求创建Excel表格、分析数据、重新计算公式、处理电子表格时触发"
-execution_guidelines: "1. 返回xlsx技能的完整使用说明\n2. 提供公式重新计算工具\n3. 支持多种电子表格格式\n4. 支持数据分析和可视化"
-author: "Anthropic"
-license: Proprietary. LICENSE.txt has complete terms
+description: "Comprehensive spreadsheet operations including read, analyze, merge, create, and edit. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv)."
+version: "2.0.0"
+trigger_conditions: "用户请求读取Excel文件、分析数据、合并表格、创建新表格或编辑表格时触发"
+execution_guidelines: "1. 根据operation参数执行相应操作\n2. 返回操作结果或错误信息\n3. 支持多种Excel操作：读取、分析、合并、创建、编辑"
+author: "Lingxi Team"
+license: MIT
 ---
 
-# XLSX Skill Usage Guide
+# XLSX Skill Documentation
 
-## Core Tools
-- **pandas**: Data analysis, bulk operations, and simple data export
-- **openpyxl**: Formulas, formatting, and Excel-specific features
-- **recalc.py**: Recalculate formulas using LibreOffice (auto-configures on first run)
+## Overview
 
-## Critical Requirements
+This skill provides comprehensive Excel file operations including reading, analyzing, merging, creating, and editing Excel files.
 
-### Use Excel Formulas (NOT Hardcoded Values)
-Always use Excel formulas instead of calculating values in Python and hardcoding them.
+## Operations
 
-❌ Wrong:
+### 1. Read (读取Excel文件)
+
+Read an Excel file and return its structure and content.
+
+**Parameters:**
+- `operation` (required): "read"
+- `file_path` (required): Path to the Excel file
+
+**Returns:**
+- Success: File path, row count, column count, column names, and first 5 rows
+- Error: Error message
+
+**Example:**
 ```python
-total = df['Sales'].sum()
-sheet['B10'] = total  # Hardcodes 5000
+xlsx(operation="read", file_path="人员信息.xlsx")
 ```
 
-✅ Correct:
+### 2. Analyze (分析Excel文件)
+
+Analyze an Excel file and return detailed statistics.
+
+**Parameters:**
+- `operation` (required): "analyze"
+- `file_path` (required): Path to the Excel file
+
+**Returns:**
+- Success: Data shape, data types, and statistical information
+- Error: Error message
+
+**Example:**
 ```python
-sheet['B10'] = '=SUM(B2:B9)'  # Dynamic formula
+xlsx(operation="analyze", file_path="人员信息.xlsx")
 ```
 
-### Formula Recalculation (MANDATORY)
-After creating/editing files with formulas, you MUST recalculate:
+### 3. Merge (合并Excel文件)
+
+Merge two Excel files based on common columns.
+
+**Parameters:**
+- `operation` (required): "merge"
+- `file_path1` (required): Path to the first Excel file
+- `file_path2` (required): Path to the second Excel file
+- `output_file` (optional): Path for the merged output file (default: "merged.xlsx")
+
+**Returns:**
+- Success: Merge result, file information, and output file details
+- Error: Error message
+
+**Example:**
+```python
+xlsx(
+    operation="merge",
+    file_path1="人员信息.xlsx",
+    file_path2="员工信息表.xlsx",
+    output_file="合并后的人员信息.xlsx"
+)
+```
+
+### 4. Create (创建Excel文件)
+
+Create a new Excel file from content.
+
+**Parameters:**
+- `operation` (required): "create"
+- `output_file` (optional): Path for the output file (default: "output.xlsx")
+- `content` (required): Content to write (CSV format)
+
+**Returns:**
+- Success: Creation result and file information
+- Error: Error message
+
+**Example:**
+```python
+xlsx(
+    operation="create",
+    output_file="output.xlsx",
+    content="name,age\nAlice,25\nBob,30"
+)
+```
+
+### 5. Edit (编辑Excel文件)
+
+Edit an existing Excel file.
+
+**Parameters:**
+- `operation` (required): "edit"
+- `file_path` (required): Path to the Excel file
+
+**Returns:**
+- Success: Edit result and file information
+- Error: Error message
+
+**Example:**
+```python
+xlsx(operation="edit", file_path="人员信息.xlsx")
+```
+
+## Dependencies
+
+- pandas
+- openpyxl
+
+Install dependencies:
 ```bash
-python recalc.py output.xlsx [timeout_seconds]
+pip install pandas openpyxl
 ```
 
-The script returns JSON with error details. If `status` is `errors_found`, fix errors and recalculate again.
+## Error Handling
 
-## Common Operations
-
-### Read and Analyze Data
-```python
-import pandas as pd
-
-# Read Excel
-df = pd.read_excel('file.xlsx')  # First sheet
-all_sheets = pd.read_excel('file.xlsx', sheet_name=None)  # All sheets
-
-# Analyze
-df.head()
-df.info()
-df.describe()
-
-# Write
-df.to_excel('output.xlsx', index=False)
-```
-
-### Create/Edit with Formulas
-```python
-from openpyxl import Workbook, load_workbook
-
-# Create new
-wb = Workbook()
-sheet = wb.active
-sheet['A1'] = 'Hello'
-sheet['B1'] = '=SUM(A2:A10)'
-wb.save('output.xlsx')
-
-# Edit existing
-wb = load_workbook('existing.xlsx')
-sheet = wb.active
-sheet['A1'] = 'New Value'
-wb.save('modified.xlsx')
-```
-
-### Formatting
-```python
-from openpyxl.styles import Font, PatternFill, Alignment
-
-sheet['A1'].font = Font(bold=True, color='FF0000')
-sheet['A1'].fill = PatternFill('solid', start_color='FFFF00')
-sheet['A1'].alignment = Alignment(horizontal='center')
-sheet.column_dimensions['A'].width = 20
-```
-
-## Formula Verification Checklist
-
-### Essential Checks
-- [ ] Test 2-3 sample references before building full model
-- [ ] Verify column mapping (column 64 = BL, not BK)
-- [ ] Remember Excel rows are 1-indexed (DataFrame row 5 = Excel row 6)
-
-### Common Pitfalls
-- [ ] Handle NaN values with `pd.notna()`
-- [ ] Check denominators before division to avoid #DIV/0!
-- [ ] Verify all cell references exist to avoid #REF!
-- [ ] Use correct format for cross-sheet references: `Sheet1!A1`
-
-### Interpreting recalc.py Output
-```json
-{
-  "status": "success",
-  "total_errors": 0,
-  "total_formulas": 42,
-  "error_summary": {
-    "#REF!": {"count": 2, "locations": ["Sheet1!B5"]}
-  }
-}
-```
+The skill will return clear error messages for common issues:
+- Missing required parameters
+- File not found
+- Invalid operation type
+- Execution errors
 
 ## Best Practices
 
-### Library Selection
-- Use **pandas** for data analysis and bulk operations
-- Use **openpyxl** for complex formatting and formulas
-
-### Working with openpyxl
-- Cell indices are 1-based (row=1, column=1 = cell A1)
-- Use `data_only=True` to read calculated values (warning: saves replace formulas with values)
-- For large files: `read_only=True` for reading, `write_only=True` for writing
-
-### Working with pandas
-- Specify data types: `pd.read_excel('file.xlsx', dtype={'id': str})`
-- Read specific columns: `pd.read_excel('file.xlsx', usecols=['A', 'C'])`
-- Handle dates: `pd.read_excel('file.xlsx', parse_dates=['date_column'])`
-
-### Code Style
-- Write minimal, concise Python code without unnecessary comments
-- Avoid verbose variable names and redundant operations
-- Add comments to cells with complex formulas or important assumptions
-- Document data sources for hardcoded values
+1. **File Paths**: Always use absolute or relative file paths correctly
+2. **Merge Keys**: The merge operation automatically detects common columns
+3. **Data Types**: The skill handles various data types automatically
+4. **Error Handling**: Always check the return value for error messages

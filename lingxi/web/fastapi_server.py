@@ -9,8 +9,18 @@ from lingxi.web.websocket import WebSocketManager
 from lingxi.web.routes import chat, health, tasks, checkpoints, skills, resources, config as config_router
 from lingxi.web.state import set_assistant, set_websocket_manager, get_assistant, get_websocket_manager
 from lingxi.core.event.websocket_subscriber import WebSocketSubscriber
+from lingxi.core.event.SessionStore_subscriber import SessionStoreSubscriber
+
+def get_config():
+    """获取配置
+    
+    Returns:
+        系统配置
+    """
+    return load_config()
 
 logger = logging.getLogger(__name__)
+# 测试自动重载功能
 
 app = FastAPI(
     title="灵犀智能助手",
@@ -26,16 +36,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 确保路由在模块加载时就注册
+from lingxi.web.routes import chat, health, tasks, checkpoints, skills, resources, config as config_router
 
-def init_app(config=None):
-    """初始化FastAPI应用
+app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(tasks.router, prefix="/api", tags=["tasks"])
+app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"])
+app.include_router(skills.router, prefix="/api", tags=["skills"])
+app.include_router(resources.router, prefix="/api", tags=["resources"])
+app.include_router(config_router.router, prefix="/api", tags=["config"])
 
-    Args:
-        config: 系统配置
-    """
-    if not config:
-        config = get_config()
+try:
+    app.mount("/static", StaticFiles(directory="lingxi/web/static"), name="static")
+except RuntimeError:
+    logger.warning("静态文件目录不存在，跳过静态文件服务")
 
+
+@app.on_event("startup")
+async def startup_event():
+    """FastAPI启动事件"""
+    config = get_config()
     setup_logging(config)
 
     assistant = LingxiAssistant(config)
@@ -43,25 +64,25 @@ def init_app(config=None):
     
     # 初始化WebSocket事件订阅者
     websocket_subscriber = WebSocketSubscriber(websocket_manager)
+    
+    # 初始化会话存储事件订阅者
+    session_store_subscriber = SessionStoreSubscriber(assistant.session_manager)
 
     set_assistant(assistant)
     set_websocket_manager(websocket_manager)
 
-    app.include_router(chat.router, prefix="/api", tags=["chat"])
-    app.include_router(health.router, prefix="/api", tags=["health"])
-    app.include_router(tasks.router, prefix="/api", tags=["tasks"])
-    app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"])
-    app.include_router(skills.router, prefix="/api", tags=["skills"])
-    app.include_router(resources.router, prefix="/api", tags=["resources"])
-    app.include_router(config_router.router, prefix="/api", tags=["config"])
-
-    try:
-        app.mount("/static", StaticFiles(directory="lingxi/web/static"), name="static")
-    except RuntimeError:
-        logger.warning("静态文件目录不存在，跳过静态文件服务")
-
     logger.info("初始化FastAPI服务器")
     logger.info(f"服务器配置: host={config.get('web', {}).get('host')}, port={config.get('web', {}).get('port')}")
+
+
+def init_app(config=None):
+    """初始化FastAPI应用
+
+    Args:
+        config: 系统配置
+    """
+    # 这个函数现在主要用于向后兼容
+    pass
 
 
 @app.websocket("/ws")

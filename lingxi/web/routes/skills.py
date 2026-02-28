@@ -179,6 +179,7 @@ async def reload_skill(skill_id: str) -> Dict[str, Any]:
     Returns:
         重载结果
     """
+    # 测试自动重载功能
     assistant = get_assistant()
     websocket_manager = get_websocket_manager()
     if not assistant:

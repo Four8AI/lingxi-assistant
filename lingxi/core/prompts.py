@@ -7,8 +7,7 @@
 
 import platform
 import os
-from re import I
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 
 
 class PromptTemplates:
@@ -140,226 +139,6 @@ class PromptTemplates:
         return formatted
 
     @staticmethod
-    def format_plan_results(results: List[Dict[str, Any]]) -> str:
-        """格式化规划执行结果
-
-        Args:
-            results: 执行结果列表
-
-        Returns:
-            格式化后的结果字符串
-        """
-        if not results:
-            return "无执行结果"
-
-        formatted = ""
-        for i, result in enumerate(results):
-            formatted += f"步骤 {i + 1}:\n"
-            
-            # 处理 action_input，可能是字符串或字典
-            action_input = result.get('action_input', '')
-            if isinstance(action_input, dict):
-                # 如果是字典，格式化为 key=value 形式
-                params_str = ', '.join([f"{k}={v}" for k, v in action_input.items()])
-                formatted += f"行动: {result.get('action', '')} - {params_str.replace('\n', '\\n')}\n"
-            else:
-                # 如果是字符串，替换换行符
-                action_input_str = str(action_input).replace('\n', '\\n')
-                formatted += f"行动: {result.get('action', '')} - {action_input_str}\n"
-            
-            if result.get('observation'):
-                observation = result.get('observation', '').replace('\n', '\\n')
-                formatted += f"观察: {observation.replace('\n', '\\n')}\n"
-            formatted += "\n"
-        return formatted
-
-    @staticmethod
-    def build_react_prompt(
-        user_input: str,
-        task_info: Dict[str, Any],
-        history_context: str,
-        skills_list: str,
-        steps: List[Dict[str, str]],
-        system_info: Optional[Dict[str, str]] = None
-    ) -> str:
-        """构建ReAct模式提示词
-
-        Args:
-            user_input: 用户输入
-            task_info: 任务信息
-            history_context: 历史上下文
-            skills_list: 可用技能列表
-            steps: 已执行步骤
-            system_info: 系统信息（可选）
-
-        Returns:
-            ReAct提示词
-        """
-        if system_info is None:
-            system_info = PromptTemplates.get_system_info()
-
-        executed_steps = PromptTemplates.format_executed_steps(steps, include_thought=False, max_prev_length=5000)
-
-        prompt = f"""
-        你是灵犀智能助手，使用ReAct模式解决问题。
-
-        系统环境: {system_info['os_info']}
-        当前工作目录: {system_info['current_dir']}
-        Shell类型: {system_info['shell_type']}
-
-        任务类型: {task_info.get('task_type', '未知')}
-        任务描述: {task_info.get('description', '无')}
-
-        历史上下文:
-        {history_context}
-
-        用户输入:
-        {user_input}
-
-        可用行动:
-        {skills_list}
-        finish(answer) - 完成任务并返回答案
-
-        【重要】必须严格按照以下JSON格式输出，不要包含任何其他文字：
-        {{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
-
-        示例：
-        {{"thought": "用户要求创建test.txt文件并写入内容", "action": "create_file", "action_input": {{"file_path": "test.txt", "content": "hello world!!!"}}}}
-
-        {{"thought": "用户要求读取data.txt文件", "action": "read_file", "action_input": {{"file_path": "data.txt"}}}}
-
-        {{"thought": "用户要求分析Excel文件", "action": "xlsx", "action_input": {{"file_path": "data.xlsx"}}}}
-
-        {{"thought": "任务已完成，返回最终答案", "action": "finish", "action_input": "任务已成功完成"}}
-
-        注意事项：
-        - 当任务已经完成时，必须使用finish行动结束任务
-        - finish的action_input应该是对用户的最终回答（字符串）
-        - 不要在任务完成后继续执行其他行动
-        - 必须返回有效的JSON格式，不要包含任何其他文字或说明
-        - action_input是参数对象，不是字符串
-        - 参数值如果是字符串，必须用双引号包裹
-        - 参数值可以包含换行符等特殊字符
-        - 在处理长文本本文件时，使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
-
-        已执行步骤:
-        {executed_steps}
-        现在请输出下一步:
-        """
-        return prompt
-
-    @staticmethod
-    def build_plan_react_prompt(
-        task: str,
-        task_info: Dict[str, Any],
-        history_context: str,
-        current_step: str,
-        skills_list: str,
-        previous_results: List[Dict[str, Any]],
-        system_info: Optional[Dict[str, str]] = None
-    ) -> str:
-        """构建Plan-ReAct模式步骤提示词
-
-        Args:
-            task: 任务文本
-            task_info: 任务信息
-            history_context: 历史上下文
-            current_step: 当前步骤描述
-            skills_list: 可用技能列表
-            previous_results: 之前步骤的结果
-            system_info: 系统信息（可选）
-
-        Returns:
-            Plan-ReAct步骤提示词
-        """
-        if system_info is None:
-            system_info = PromptTemplates.get_system_info()
-
-        results_str = PromptTemplates.format_executed_steps(previous_results, include_thought=True, max_prev_length=5000)
-
-        prompt = f'''你是灵犀智能助手，使用Plan-ReAct模式解决问题。
-
-系统环境: {system_info['os_info']}
-当前工作目录: {system_info['current_dir']}
-Shell类型: {system_info['shell_type']}
-
-任务类型: {task_info.get('level', '未知')}
-任务描述: {task_info.get('reason', '无')}
-
-历史上下文:
-{history_context}
-
-用户输入:
-{task}
-
-当前执行步骤:
-{current_step}
-
-工具列表:
-{skills_list}
-finish(answer) - 完成任务并返回答案
-
-【重要】必须严格按照以下JSON格式输出，不要包含任何其他文字：
-{{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
-
-注意事项：
-- 当任务已经完成时，必须使用finish行动结束任务
-- finish的action_input应该是对用户的最终回答（字符串）
-- 不要在任务完成后继续执行其他行动
-- 必须返回有效的JSON格式，不要包含任何其他文字或说明
-- action_input是参数对象，不是字符串
-- 参数值如果是字符串，必须用双引号包裹
-- 参数值可以包含换行符等特殊字符
-- 在处理长文本本文件时，使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
-
-之前步骤的结果:
-{results_str}
-现在请输出下一步:
-'''
-        return prompt
-
-    @staticmethod
-    def build_task_planning_prompt(
-        task: str,
-        task_info: Dict[str, Any],
-        history_context: str
-    ) -> str:
-        """构建任务规划提示词
-
-        Args:
-            task: 任务文本
-            task_info: 任务信息
-            history_context: 历史上下文
-
-        Returns:
-            任务规划提示词
-        """
-        prompt = f"""请为用户输入生成详细的任务规划，包括具体的步骤。
-
-任务类型: {task_info.get('level', '未知')}
-任务描述: {task_info.get('reason', '无')}
-
-历史上下文:
-{history_context}
-
-用户输入:
-{task}
-
-【重要】必须严格按照以下格式输出，不要包含任何其他内容：
-1. 第一步的具体描述
-2. 第二步的具体描述
-3. 第三步的具体描述
-...
-
-要求：
-- 每个步骤一行，以数字开头
-- 步骤描述要具体、可执行
-- 不要使用Markdown格式
-- 不要添加任何解释、标题、分隔线或其他格式
-"""
-        return prompt
-
-    @staticmethod
     def build_final_response_prompt(
         user_input: str,
         steps: List[Dict[str, str]],
@@ -453,8 +232,8 @@ finish(answer) - 完成任务并返回答案
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
 
-任务类型: {task_info.get('task_type', '未知')}
-任务描述: {task_info.get('description', '无')}
+任务类型: {task_info.get('level', task_info.get('task_type', '未知'))}
+任务描述: {task_info.get('reason', task_info.get('description', '无'))}
 
 可用行动:
 {skills_list}
@@ -464,12 +243,6 @@ finish(answer) - 完成任务并返回答案
 {{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
 
 示例：
-{{"thought": "用户要求创建test.txt文件并写入内容", "action": "create_file", "action_input": {{"file_path": "test.txt", "content": "hello world!!!"}}}}
-
-{{"thought": "用户要求读取data.txt文件", "action": "read_file", "action_input": {{"file_path": "data.txt"}}}}
-
-{{"thought": "用户要求分析Excel文件", "action": "xlsx", "action_input": {{"file_path": "data.xlsx"}}}}
-
 {{"thought": "任务已完成，返回最终答案", "action": "finish", "action_input": "任务已成功完成"}}
 
 注意事项：
@@ -480,14 +253,19 @@ finish(answer) - 完成任务并返回答案
 - action_input是参数对象，不是字符串
 - 参数值如果是字符串，必须用双引号包裹
 - 参数值可以包含换行符等特殊字符
-- 在处理长文本本文件时，使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
+- 在处理长文本文件时（如.txt, .py, .js, .md, .json, .yaml等），使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
+- 读取Excel文件（.xlsx, .xlsm）时，必须使用xlsx技能，不要使用read_file
+- 【代码生成注意事项】：
+  - 使用execute_command执行Python代码时，字符串中如果包含双引号，请使用转义(\")或使用单引号包裹字符串
+  - 避免在字符串中使用未转义的特殊字符
+  - 确保生成的Python代码语法正确，不会导致JSON解析错误
+
+历史上下文:
+{history_context}
+用户输入:
+{user_input}
 """
 
-        history_part = f"""历史上下文:
-{history_context}"""
-
-        user_input_part = f"""用户输入:
-{user_input}"""
 
         steps_part = f"""已执行步骤:
 {executed_steps}
@@ -501,8 +279,6 @@ finish(answer) - 完成任务并返回答案
             {
                 "role": "user",
                 "content": [
-                    PromptTemplates.build_cached_text_content(history_part, enable_cache=True),
-                    PromptTemplates.build_cached_text_content(user_input_part, enable_cache=True),
                     PromptTemplates.build_cached_text_content(steps_part, enable_cache=False)
                 ]
             }
@@ -560,15 +336,27 @@ finish(answer) - 完成任务并返回答案
 【重要】必须严格按照以下JSON格式输出，不要包含任何其他文字：
 {{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
 
+## 格式要求（必须严格遵守，否则解析失败）：
+1. 仅返回JSON字符串，**不要添加任何解释、说明、换行、多余空格**；
+2. JSON字段必须包含：
+   - thought：字符串，描述当前执行思路（简洁，无换行）；
+   - action：字符串，固定值为"xlsx"；
+   - action_input：对象，包含operation（操作类型）、file_path（文件路径，路径分隔符用单斜杠/或双反斜杠\\）；
+3. JSON中所有字符串使用**双引号**包裹，禁止使用单引号；
+4. 禁止出现截断、多余空格（如"当前执 行步骤"这类错误）；
+5. 示例正确格式：
+{{"thought":"读取人员信息.xlsx文件，加载所有工作表数据","action":"xlsx","action_input":{{"operation":"read","file_path":"D:\\resource\\python\\lingxi\\人员信息.xlsx"}}}}
+
 注意事项：
-- 当任务已经完成时，必须使用finish行动结束任务
+- 当任务全部完成时，必须使用finish行动结束任务
 - finish的action_input应该是对用户的最终回答（字符串）
 - 不要在任务完成后继续执行其他行动
 - 必须返回有效的JSON格式，不要包含任何其他文字或说明
 - action_input是参数对象，不是字符串
 - 参数值如果是字符串，必须用双引号包裹
 - 参数值可以包含换行符等特殊字符
-- 在处理长文本本文件时，使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
+- 在处理长文本文件时（如.txt, .py, .js, .md, .json, .yaml等），使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
+- 读取Excel文件（.xlsx, .xlsm）时，必须使用xlsx技能，不要使用read_file
 """
 
         history_part = f"""历史上下文:

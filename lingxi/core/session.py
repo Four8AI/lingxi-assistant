@@ -4,9 +4,54 @@ import json
 import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from dataclasses import dataclass, field
+
+from pydantic_core.core_schema import nullable_schema
 from lingxi.core.classifier import TaskClassifier
 from lingxi.core.llm_client import LLMClient
 from lingxi.context.manager import ContextManager, ContentType
+from test_task_description_simple import task_info
+
+
+@dataclass
+class Step:
+    """任务步骤实体类（使用dataclass）"""
+    step_id: str
+    step_type: str
+    thought: str = ""
+    result: str = ""
+    skill_call: str = ""
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()        
+
+
+@dataclass
+class Task:
+    """任务实体类（使用dataclass）"""
+    task_id: str
+    task_type: str
+    plan: str = "[]"
+    steps: List[Step] = field(default_factory=list)
+    user_input: str = ""
+    result: str = ""
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()    
+
+
+@dataclass
+class Session:
+    """会话实体类（使用dataclass）"""
+    session_id: str
+    user_name: str = "default"
+    history_json: str = "[]"
+    checkpoint_json: str = "{}"
+    token_count: int = 0
+    task_list: Dict[str, Task] = field(default_factory=dict)
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()
+    
+    def get_info(self):
+        return f"{self.session_id}，{self.user_name}，{self.created_at}，{self.updated_at}"
 
 
 class SessionManager:
@@ -42,6 +87,8 @@ class SessionManager:
                 user_name TEXT DEFAULT 'default',
                 history_json TEXT,
                 checkpoint_json TEXT,
+                task_list TEXT,
+                token_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -62,20 +109,67 @@ class SessionManager:
         if max_turns is None:
             max_turns = self.max_history_turns
 
-        if session_id in self.memory_cache:
-            return self.memory_cache[session_id][-max_turns:]
+        # 确保会话在缓存中且类型正确
+        if session_id not in self.memory_cache or not hasattr(self.memory_cache[session_id], 'history_json'):
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 从数据库加载历史记录（如果缓存中没有）
+        if not self.memory_cache[session_id].history_json:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT history_json FROM sessions WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            conn.close()
 
+            if row and row[0]:
+                self.memory_cache[session_id].history_json = row[0]
+            else:
+                self.memory_cache[session_id].history_json = "[]"
+        
+        # 解析历史记录
+        history = json.loads(self.memory_cache[session_id].history_json)
+        if not isinstance(history, list):
+            history = []
+            
+        return history[-max_turns:]
+
+    def get_task(self, session_id: str, task_id: str) -> Optional[Task]:
+        """获取任务
+
+        Args:
+            session_id: 会话ID
+            task_id: 任务ID
+
+        Returns:
+            任务实体类
+        """
+        # 确保会话在缓存中且类型正确
+        if session_id not in self.memory_cache or not hasattr(self.memory_cache[session_id], 'task_list'):
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        if task_id in self.memory_cache[session_id].task_list:
+            return self.memory_cache[session_id].task_list.get(task_id)
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT history_json FROM sessions WHERE session_id = ?", (session_id,))
+        cursor.execute("SELECT task_list FROM sessions WHERE session_id = ?", (session_id,))
         row = cursor.fetchone()
         conn.close()
 
+        task_list = {}
         if row and row[0]:
-            history = json.loads(row[0])
-            self.memory_cache[session_id] = history
-            return history[-max_turns:]
-        return []
+            try:
+                task_list = json.loads(row[0])
+                if task_list and not isinstance(task_list, dict):
+                    task_list = {}
+            except json.JSONDecodeError:
+                task_list = {}
+        
+        self.memory_cache[session_id].task_list = task_list
+        
+        return task_list.get(task_id)
+
+    
 
     def add_turn(self, session_id: str, role: str, content: str,
                  content_type: ContentType = None,
@@ -123,7 +217,12 @@ class SessionManager:
         if len(history) > self.max_history_turns:
             history = history[-self.max_history_turns:]
 
-        self.memory_cache[session_id] = history
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache:
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 更新缓存中的历史记录
+        self.memory_cache[session_id].history_json = json.dumps(history)
         self._save_to_db(session_id, history)
 
         self.context_manager.add_message(
@@ -133,6 +232,143 @@ class SessionManager:
             task_id=task_id,
             metadata=metadata
         )
+    def add_step(self, session_id: str, task_id: str, step_index: int, result: str, thought: str = None, action: str = None, action_input: str = None):
+        """添加任务步骤
+
+        Args:
+            session_id: 会话ID
+            task_id: 任务ID
+            step_index: 步骤索引
+            result: 步骤结果（字符串格式）
+            thought: 思考过程
+            action: 执行行动
+            action_input: 行动输入
+        """
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache or not hasattr(self.memory_cache[session_id], 'task_list'):
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 确保任务存在
+        if task_id not in self.memory_cache[session_id].task_list:
+            self.memory_cache[session_id].task_list[task_id] = {
+                "task_id": task_id,
+                "task_type": "unknown",
+                "plan": "[]",
+                "steps": [],
+                "user_input": "",
+                "result": "",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            self.logger.debug(f"创建新任务，session_id: {session_id}, task_id: {task_id}")
+        
+        # 获取任务信息
+        task_info = self.memory_cache[session_id].task_list.get(task_id)
+        
+        # 确保 steps 字段存在
+        if "steps" not in task_info:
+            task_info["steps"] = []
+        
+        # 扩展列表长度以容纳新步骤
+        while len(task_info["steps"]) <= step_index:
+            task_info["steps"].append({})
+        
+        # 构建步骤信息（使用字典格式，避免创建Step对象时的字段缺失问题）
+        step_info = {
+            "step_id": str(step_index),
+            "step_type": action or "unknown",
+            "thought": thought or "",
+            "result": result,
+            "skill_call": action or "",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        # 更新步骤信息
+        task_info["steps"][step_index] = step_info
+        
+        # 更新内存中的任务列表
+        self.memory_cache[session_id].task_list[task_id] = task_info
+        
+        # 保存到数据库
+        self._save_task_list_to_db(session_id, self.memory_cache[session_id].task_list)
+        
+        self.logger.debug(f"步骤已添加，session_id: {session_id}, task_id: {task_id}, step_index: {step_index}")
+
+    def set_task_result(self, session_id: str, task_id: str, result: str = None ,user_input: str = None):
+        """设置任务结果
+
+        Args:
+            session_id: 会话ID
+            task_id: 任务ID
+            task_info: 任务信息（字典格式）
+        """
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache or not hasattr(self.memory_cache[session_id], 'task_list'):
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 确保任务存在
+        if task_id not in self.memory_cache[session_id].task_list:
+            self.memory_cache[session_id].task_list[task_id] = {
+                "task_id": task_id,
+                "task_type": "unknown",
+                "plan": "[]",
+                "steps": [],
+                "user_input": user_input or "",
+                "result": result or "",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            self.logger.debug(f"创建新任务，session_id: {session_id}, task_id: {task_id}")
+        else:
+            # 获取任务信息
+            task_info = self.memory_cache[session_id].task_list.get(task_id)
+            
+            # 更新任务结果
+            if result is not None:
+                task_info["result"] = result
+            if user_input is not None:
+                task_info["user_input"] = user_input
+            
+            task_info["updated_at"] = datetime.now().isoformat()
+        
+        # 保存到数据库
+        self._save_task_list_to_db(session_id, self.memory_cache[session_id].task_list)
+        self.logger.debug(f"任务结果已保存，session_id: {session_id}, task_id: {task_id}")
+    
+    def save_plan(self, session_id: str, task_id: str, plan: str):
+        """保存任务计划
+
+        Args:
+            session_id: 会话ID
+            task_id: 任务ID
+            plan: 任务计划（JSON字符串）
+        """
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache:
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 确保任务存在
+        if task_id not in self.memory_cache[session_id].task_list:
+            self.memory_cache[session_id].task_list[task_id] = {
+                "task_id": task_id,
+                "task_type": "unknown",
+                "plan": "[]",
+                "steps": [],
+                "user_input": "",
+                "result": "",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+        
+        # 更新任务计划
+        self.memory_cache[session_id].task_list[task_id]["plan"] = plan
+        self.memory_cache[session_id].task_list[task_id]["updated_at"] = datetime.now().isoformat()
+        
+        # 保存到数据库
+        self._save_task_list_to_db(session_id, self.memory_cache[session_id].task_list)
+        self.logger.debug(f"任务计划已保存，session_id: {session_id}, task_id: {task_id}")
+
 
     def _save_to_db(self, session_id: str, history: List[Dict[str, Any]]):
         """保存会话历史到数据库
@@ -147,6 +383,22 @@ class SessionManager:
             INSERT OR REPLACE INTO sessions (session_id, history_json, updated_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
         """, (session_id, json.dumps(history, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+
+    def _save_task_list_to_db(self, session_id: str, task_list: Dict[str, Any]):
+        """保存任务列表到数据库
+
+        Args:
+            session_id: 会话ID
+            task_list: 任务列表
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO sessions (session_id, task_list, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (session_id, json.dumps(task_list, ensure_ascii=False, default=str)))
         conn.commit()
         conn.close()
 
@@ -207,7 +459,8 @@ class SessionManager:
             session_id: 会话ID
         """
         if session_id in self.memory_cache:
-            self.memory_cache[session_id] = []
+            # 只清除历史记录，不覆盖整个Session对象
+            self.memory_cache[session_id].history_json = "[]"
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -494,7 +747,12 @@ class SessionManager:
         else:
             history.insert(0, {"role": "system", "type": "title", "content": new_title, "time": time.time()})
 
-        self.memory_cache[session_id] = history
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache:
+            self.memory_cache[session_id] = Session(session_id=session_id)
+        
+        # 更新缓存中的历史记录
+        self.memory_cache[session_id].history_json = json.dumps(history)
         self._save_to_db(session_id, history)
         return True
 
@@ -530,6 +788,9 @@ class SessionManager:
         """
         import uuid
         session_id = f"session_{uuid.uuid4().hex[:8]}"
+        
+        # 确保user_name不是None
+        user_name = user_name if user_name is not None else "default"
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

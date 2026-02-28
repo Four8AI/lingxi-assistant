@@ -800,8 +800,21 @@ class WebSocketManager:
                     if reasoning_content_str:
                         metadata["reasoning"] = reasoning_content_str
                     
+                    # 构建步骤信息
+                    steps = []
+                    for i, thought in enumerate(reasoning_content):
+                        steps.append({
+                            "stepIndex": i,
+                            "description": f"步骤 {i + 1}",
+                            "status": "completed",
+                            "thought": thought
+                        })
+                    
                     self.assistant.session_manager.add_turn(
-                        session_id, "assistant", final_response_str, metadata=metadata
+                        session_id, "assistant", final_response_str, 
+                        metadata=metadata,
+                        steps=steps,
+                        thought=reasoning_content_str
                     )
                     
                     end_msg = WebSocketMessage.create_response(
@@ -920,15 +933,45 @@ class WebSocketManager:
         """
         # 转换为前端期望的格式
         for thought in thoughts:
-            event = {
-                "choices": [{
-                    "delta": {
-                        "thought": thought.get("thought", ""),
-                        "action": thought.get("action", None)
-                    }
-                }]
-            }
+            # 处理plan_react_core.py发送的格式（包含step和description字段）
+            if "step" in thought and "description" in thought:
+                event = {
+                    "choices": [{
+                        "delta": {
+                            "thought": f"步骤 {thought['step']}: {thought['description']}",
+                            "action": None
+                        }
+                    }]
+                }
+            else:
+                # 处理其他格式（包含thought和action字段）
+                event = {
+                    "choices": [{
+                        "delta": {
+                            "thought": thought.get("thought", ""),
+                            "action": thought.get("action", None)
+                        }
+                    }]
+                }
             await self.send_to_session(session_id, event)
+
+    async def send_event(self, session_id: str, event_type: str, execution_id: str, data: dict):
+        """发送事件
+
+        Args:
+            session_id: 会话ID
+            event_type: 事件类型
+            execution_id: 执行ID
+            data: 事件数据
+        """
+        event = {
+            "type": event_type,
+            "payload": {
+                "executionId": execution_id,
+                **data
+            }
+        }
+        await self.send_to_session(session_id, event)
 
     async def send_step_status_event(self, session_id: str, execution_id: str, step_index: int, 
                                      status: str, error: str = None):

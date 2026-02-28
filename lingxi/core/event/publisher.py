@@ -44,7 +44,8 @@ class EventPublisher:
             **kwargs: 事件参数
         """
         # 记录事件发布日志，无论是否有订阅者
-        self.logger.debug(f"发布事件: {event_type}，参数: {kwargs}")
+        if(event_type !="think_stream"):
+            self.logger.debug(f"发布事件: {event_type}，参数: {kwargs}")
         
         if event_type in self._subscribers:
             for callback in self._subscribers[event_type]:

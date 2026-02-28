@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Dict, Optional, Any, List, Union
+import re
+import json
+from typing import Dict, Optional, Any, List, Union, Generator, Tuple
 
 class LLMClient:
     """LLM客户端，用于与大语言模型交互，支持上下文缓存"""
@@ -24,6 +26,8 @@ class LLMClient:
 
         self.models_config = self.llm_config.get("models", {})
         self.default_model = self.llm_config.get("default_model", "qwen-plus")
+        self.retry_count = self.llm_config.get("retry_count", 2)
+        self.retry_delay = self.llm_config.get("retry_delay", 1)
 
         self._init_client()
 
@@ -249,6 +253,9 @@ class LLMClient:
         Returns:
             生成的文本（非流式）或流式响应对象（流式）
         """
+        import time
+        from openai import APIError
+
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
@@ -261,19 +268,45 @@ class LLMClient:
         # 打印提示词内容
         self.logger.debug(f"发送提示词到模型 {model}: \n" + "\n".join([f"{msg['role']}: {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}" for msg in messages]))
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=model_config.get("temperature", self.temperature),
-            max_tokens=model_config.get("max_tokens", self.max_tokens),
-            timeout=self.timeout,
-            stream=stream,
-            stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
-        )
+        # 检查是否需要JSON格式输出
+        response_format = kwargs.get("response_format")
+        
+        last_error = None
+        for attempt in range(self.retry_count + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=model_config.get("temperature", self.temperature),
+                    max_tokens=model_config.get("max_tokens", self.max_tokens),
+                    timeout=self.timeout,
+                    stream=stream,
+                    extra_body={
+                        "enable_thinking": kwargs.get("enable_thinking", False)
+                    },
+                    stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None,
+                    response_format=response_format
+                )
 
-        if not stream:
-            return response.choices[0].message.content
-        return response
+                if not stream:
+                    return response.choices[0].message.content
+                return response
+            except APIError as e:
+                last_error = e
+                self.logger.warning(f"OpenAI API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"OpenAI API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+
+        raise last_error if last_error else Exception("OpenAI API调用失败")
 
     def _dashscope_complete(self, prompt: str, task_level: str = None, stream: bool = False, **kwargs) -> Union[str, Any]:
         """使用阿里云百炼API生成完成
@@ -287,6 +320,9 @@ class LLMClient:
         Returns:
             生成的文本（非流式）或流式响应对象（流式）
         """
+        import time
+        from openai import APIError
+
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
@@ -299,19 +335,45 @@ class LLMClient:
         # 打印提示词内容
         self.logger.debug(f"发送提示词到模型 {model}: \n" + "\n".join([f"{msg['role']}: {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}" for msg in messages]))
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=model_config.get("temperature", self.temperature),
-            max_tokens=model_config.get("max_tokens", self.max_tokens),
-            timeout=self.timeout,
-            stream=stream,
-            stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
-        )
+        # 检查是否需要JSON格式输出
+        response_format = kwargs.get("response_format")
+        
+        last_error = None
+        for attempt in range(self.retry_count + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=model_config.get("temperature", self.temperature),
+                    max_tokens=model_config.get("max_tokens", self.max_tokens),
+                    timeout=self.timeout,
+                    stream=stream,
+                    extra_body={
+                        "enable_thinking": kwargs.get("enable_thinking", False)
+                    },
+                    stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None,
+                    response_format=response_format
+                )
 
-        if not stream:
-            return response.choices[0].message.content
-        return response
+                if not stream:
+                    return response.choices[0].message.content
+                return response
+            except APIError as e:
+                last_error = e
+                self.logger.warning(f"Dashscope API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"Dashscope API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+
+        raise last_error if last_error else Exception("Dashscope API调用失败")
 
     def _azure_complete(self, prompt: str, task_level: str = None, stream: bool = False, **kwargs) -> Union[str, Any]:
         """使用Azure OpenAI API生成完成
@@ -325,6 +387,9 @@ class LLMClient:
         Returns:
             生成的文本（非流式）或流式响应对象（流式）
         """
+        import time
+        from openai import APIError
+
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
@@ -337,19 +402,42 @@ class LLMClient:
         # 打印提示词内容
         self.logger.debug(f"发送提示词到模型 {model}: \n" + "\n".join([f"{msg['role']}: {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}" for msg in messages]))
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=model_config.get("temperature", self.temperature),
-            max_tokens=model_config.get("max_tokens", self.max_tokens),
-            timeout=self.timeout,
-            stream=stream,
-            stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
-        )
+        # 检查是否需要JSON格式输出
+        response_format = kwargs.get("response_format")
+        
+        last_error = None
+        for attempt in range(self.retry_count + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=model_config.get("temperature", self.temperature),
+                    max_tokens=model_config.get("max_tokens", self.max_tokens),
+                    timeout=self.timeout,
+                    stream=stream,
+                    stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None,
+                    response_format=response_format
+                )
 
-        if not stream:
-            return response.choices[0].message.content
-        return response
+                if not stream:
+                    return response.choices[0].message.content
+                return response
+            except APIError as e:
+                last_error = e
+                self.logger.warning(f"Azure API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"Azure API调用尝试 {attempt + 1}/{self.retry_count + 1} 失败: {e}")
+                if attempt < self.retry_count:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise
+
+        raise last_error if last_error else Exception("Azure API调用失败")
 
     def _google_complete(self, prompt: str, task_level: str = None, stream: bool = False, **kwargs) -> Union[str, Any]:
         """使用Google Gemini API生成完成
@@ -453,6 +541,9 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
         )
 
@@ -485,7 +576,11 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
+
         )
 
         if not stream:
@@ -517,6 +612,9 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
         )
 
@@ -549,6 +647,9 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
         )
 
@@ -581,6 +682,9 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
         )
 
@@ -613,6 +717,9 @@ class LLMClient:
             max_tokens=model_config.get("max_tokens", kwargs.get("max_tokens", self.max_tokens)),
             timeout=kwargs.get("timeout", self.timeout),
             stream=stream,
+            extra_body={
+                "enable_thinking": kwargs.get("enable_thinking", False)
+            },
             stream_options=kwargs.get("stream_options", {"include_usage": True}) if stream else None
         )
 

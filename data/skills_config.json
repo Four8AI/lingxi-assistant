@@ -237,25 +237,25 @@
     "xlsx": {
       "skill_id": "xlsx",
       "skill_name": "xlsx",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "mcp",
-      "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas",
+      "description": "Comprehensive spreadsheet operations including read, analyze, merge, create, and edit. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv).",
       "author": "",
       "enabled": true,
       "config": {
         "skill_id": "xlsx",
         "skill_name": "xlsx",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "type": "mcp",
-        "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas",
+        "description": "Comprehensive spreadsheet operations including read, analyze, merge, create, and edit. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv).",
         "mcp_config": {
           "name": "xlsx",
-          "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas",
-          "version": "1.0.0",
-          "trigger_conditions": "用户请求创建Excel表格、分析数据、重新计算公式、处理电子表格时触发",
-          "execution_guidelines": "1. 返回xlsx技能的完整使用说明\n2. 提供公式重新计算工具\n3. 支持多种电子表格格式\n4. 支持数据分析和可视化",
-          "author": "Anthropic",
-          "license": "Proprietary. LICENSE.txt has complete terms"
+          "description": "Comprehensive spreadsheet operations including read, analyze, merge, create, and edit. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv).",
+          "version": "2.0.0",
+          "trigger_conditions": "用户请求读取Excel文件、分析数据、合并表格、创建新表格或编辑表格时触发",
+          "execution_guidelines": "1. 根据operation参数执行相应操作\n2. 返回操作结果或错误信息\n3. 支持多种Excel操作：读取、分析、合并、创建、编辑",
+          "author": "Lingxi Team",
+          "license": "MIT"
         },
         "parameters": []
       }

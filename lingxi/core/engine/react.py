@@ -19,4 +19,4 @@ class ReActEngine(ReActCore):
         Returns:
             系统响应（非流式）或流式响应生成器（流式）
         """
-        return self._process_task(user_input, task_info, session_history, session_id, stream)
+        return super().process(user_input, task_info, session_history, session_id, stream)

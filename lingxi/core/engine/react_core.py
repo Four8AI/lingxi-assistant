@@ -78,8 +78,8 @@ finish(answer) - 完成任务并返回答案
             os_info=system_info['os_info'],
             current_dir=system_info['current_dir'],
             shell_type=system_info['shell_type'],
-            task_type=task_info.get('task_type', '未知'),
-            description=task_info.get('description', '无'),
+            task_type=task_info.get('level', task_info.get('task_type', '未知')),
+            description=task_info.get('reason', task_info.get('description', '无')),
             skills_list=skills_list
         )
 
@@ -94,25 +94,22 @@ finish(answer) - 完成任务并返回答案
         Returns:
             消息列表
         """
-        static_context = self._build_static_context(task_info)
-        history_part = f"""历史上下文:
-{history_context}"""
-        user_input_part = f"""用户输入:
-{user_input}"""
-
-        return [
-            {
-                "role": "system",
-                "content": [PromptTemplates.build_cached_text_content(static_context, enable_cache=True)]
-            },
-            {
-                "role": "user",
-                "content": [
-                    PromptTemplates.build_cached_text_content(history_part, enable_cache=True),
-                    PromptTemplates.build_cached_text_content(user_input_part, enable_cache=True)
-                ]
-            }
-        ]
+        # 获取可用技能列表
+        available_skills = self.skill_caller.list_available_skills(enabled_only=True) if self.skill_caller else []
+        skills_list = PromptTemplates.format_skills_list(available_skills)
+        
+        # 获取系统信息
+        system_info = PromptTemplates.get_system_info()
+        
+        # 使用build_react_messages_with_cache构建消息列表
+        return PromptTemplates.build_react_messages_with_cache(
+            user_input=user_input,
+            task_info=task_info,
+            history_context=history_context,
+            skills_list=skills_list,
+            steps=[],
+            system_info=system_info
+        )
 
     def _execute_step(self, step: int, messages: List[Dict[str, Any]], task_level: str,
                      session_id: str, execution_id: str, steps: List[Dict[str, Any]],
@@ -134,11 +131,15 @@ finish(answer) - 完成任务并返回答案
         self._build_step_messages(messages, steps)
         self.logger.debug(f"生成思考和行动（stream={stream}")
 
+        # 发布思考开始事件
+        yield {
+            "type": "think_start"
+        }
+
         full_response = ""
         for response_chunk in self._process_llm_response(messages, task_level, stream):
             if response_chunk["type"] == "thought_chunk":
                 content = response_chunk["content"]
-                full_response += content
                 self._publish_think_stream(session_id, execution_id, step, content)
                 yield {
                     "type": "stream",
@@ -150,6 +151,11 @@ finish(answer) - 完成任务并返回答案
                 full_response = response_chunk["response"]
                 break
 
+        # 发布思考结束事件
+        yield {
+            "type": "think_final"
+        }
+                
         parsed = self._parse_response(full_response)
 
         if not parsed:
@@ -167,15 +173,19 @@ finish(answer) - 完成任务并返回答案
             return
 
         if parsed.get("action") == "finish":
-            final_answer = parsed.get("thought", "") + " " + parsed.get("observation", "")
-            self._publish_task_end(session_id, execution_id, final_answer)
+            final_answer = parsed.get("action_input", "")
+            self._publish_step_end(session_id, execution_id, step, "completed", None, final_answer,parsed.get("thought"))
+            task_end_event = self._publish_task_end(session_id, execution_id, final_answer)
+            yield task_end_event
+           
             for chunk in self._handle_finish_action(parsed, steps):
                 yield chunk
+            
             return
 
         for chunk in self._handle_step_complete(parsed, step):
             observation = chunk.get("observation", "")
-            self._publish_step_end(session_id, execution_id, step, "completed", None, observation)
+            self._publish_step_end(session_id, execution_id, step, "completed", None, observation,parsed.get("thought"))
             yield chunk
 
     def _execute_task_stream(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
@@ -196,6 +206,11 @@ finish(answer) - 完成任务并返回答案
         self.logger.debug(f"ReAct处理任务: {task_info.get('task_type')} (stream={stream})")
         self.logger.debug(f"用户输入: {task}")
 
+        # 发布任务开始事件
+        yield {
+            "type": "task_start"
+        }
+
         task_level = task_info.get("level", "simple")
 
         history_context = self._build_history_context(history)
@@ -206,6 +221,12 @@ finish(answer) - 完成任务并返回答案
             self.logger.debug(f"步骤 {step + 1}/{self.max_steps}")
 
             self._publish_step_start(session_id, execution_id, step, self.max_steps)
+            # 发布步骤开始事件
+            yield {
+                "type": "step_start",
+                "step": step,
+                "total_steps": self.max_steps
+            }
 
             for chunk in self._execute_step(step, messages, task_level, session_id, execution_id, steps, stream=stream):
                 yield chunk
@@ -225,7 +246,8 @@ finish(answer) - 完成任务并返回答案
                     })
 
         final_response = self._generate_final_response(task, steps, task_level)
-        self._publish_task_end(session_id, execution_id, final_response)
+        task_end_event = self._publish_task_end(session_id, execution_id, final_response)
+        yield task_end_event
         yield {
             "type": "finish",
             "result": final_response,

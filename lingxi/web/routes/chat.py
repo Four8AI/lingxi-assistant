@@ -52,12 +52,14 @@ async def create_session(request: CreateSessionRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="助手服务未初始化")
 
     try:
-        session_id = assistant.session_manager.create_session(request.user_name)
+        # 确保user_name不是None
+        user_name = request.user_name if request.user_name is not None else "default"
+        session_id = assistant.session_manager.create_session(user_name)
         session_info = assistant.session_manager.get_session_info(session_id)
 
         return {
             "session_id": session_id,
-            "user_name": session_info.get("user_name", request.user_name),
+            "user_name": session_info.get("user_name", user_name),
             "created_at": session_info.get("created_at", ""),
             "updated_at": session_info.get("updated_at", "")
         }

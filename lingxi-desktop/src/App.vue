@@ -70,7 +70,15 @@ async function initializeApp() {
           id: `${sessions[0].id}_${index}`,
           role: item.role,
           content: item.content,
-          timestamp: item.time || Date.now()
+          timestamp: item.time || Date.now(),
+          // 保留原始数据中的步骤、思考等信息
+          steps: item.steps || [],
+          thought: item.thought || '',
+          thought_chain: item.thought_chain || null,
+          plan: item.plan || null,
+          executionId: item.executionId || null,
+          status: item.status || null,
+          isThinking: item.isThinking || false
         }))
         appStore.setTurns(turns)
       }
@@ -149,8 +157,18 @@ function setupWebSocketListeners() {
         const updatedTurns = [...appStore.turns]
         const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
         if (targetIndex !== -1) {
+          const turn = updatedTurns[targetIndex]
+          
+          // 确保所有步骤都被标记为已完成
+          if (turn.steps) {
+            turn.steps = turn.steps.map(step => ({
+              ...step,
+              status: 'completed'
+            }))
+          }
+          
           updatedTurns[targetIndex] = {
-            ...updatedTurns[targetIndex],
+            ...turn,
             content: data.result,
             status: 'completed',
             isThinking: false
@@ -176,29 +194,58 @@ function setupWebSocketListeners() {
 
     window.electronAPI.ws.onThinkStream((data) => {
       console.log('Think stream:', data)
-      // 找到对应的助手消息，添加思考内容
+      // 找到对应的助手消息，将思考内容添加到具体的step对象上
       const updatedTurns = [...appStore.turns]
       const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
       if (targetIndex !== -1) {
-        if (!updatedTurns[targetIndex].thought) {
-          updatedTurns[targetIndex].thought = ''
+        const turn = updatedTurns[targetIndex]
+        if (!turn.steps) {
+          turn.steps = []
         }
-        updatedTurns[targetIndex].thought += data.body?.reasoning_content || data.content || ''
+        
+        // 获取当前步骤索引，默认为最后一个步骤
+        const stepIndex = data.step_index || turn.steps.length - 1
+        
+        // 确保步骤对象存在
+        if (!turn.steps[stepIndex]) {
+          turn.steps[stepIndex] = {
+            stepIndex: stepIndex,
+            description: `步骤 ${stepIndex + 1}`,
+            status: 'running'
+          }
+        }
+        
+        // 添加思考内容到步骤对象
+        if (!turn.steps[stepIndex].thought) {
+          turn.steps[stepIndex].thought = ''
+        }
+        turn.steps[stepIndex].thought += data.body?.reasoning_content || data.content || ''
+        
         appStore.setTurns(updatedTurns)
       }
+
     })
 
     window.electronAPI.ws.onThinkFinal((data) => {
       console.log('Think final:', data)
-      // 找到对应的助手消息，完成思考标记
+      // 找到对应的助手消息，完成思考标记并更新步骤的思考内容
       const updatedTurns = [...appStore.turns]
       const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
       if (targetIndex !== -1) {
-        updatedTurns[targetIndex] = {
-          ...updatedTurns[targetIndex],
-          isThinking: false,
-          thought: data.content || updatedTurns[targetIndex].thought
+        const turn = updatedTurns[targetIndex]
+        turn.isThinking = false
+        
+        // 将最终思考内容添加到具体的step对象上
+        if (turn.steps) {
+          // 获取当前步骤索引，默认为最后一个步骤
+          const stepIndex = data.step_index || turn.steps.length - 1
+          
+          // 确保步骤对象存在
+          if (turn.steps[stepIndex]) {
+            turn.steps[stepIndex].thought = data.content || turn.steps[stepIndex].thought
+          }
         }
+        
         appStore.setTurns(updatedTurns)
       }
     })
@@ -233,11 +280,28 @@ function setupWebSocketListeners() {
         if (!updatedTurns[targetIndex].steps) {
           updatedTurns[targetIndex].steps = []
         }
-        updatedTurns[targetIndex].steps.push({
-          stepIndex: data.step_index || 0,
-          description: `步骤 ${data.step_index || 0 + 1}`,
-          status: 'running'
-        })
+        
+        const stepIndex = data.step_index || 0
+        const existingStepIndex = updatedTurns[targetIndex].steps.findIndex(step => step.stepIndex === stepIndex)
+        
+        if (existingStepIndex !== -1) {
+          // 更新已存在的步骤
+          updatedTurns[targetIndex].steps[existingStepIndex] = {
+            ...updatedTurns[targetIndex].steps[existingStepIndex],
+            status: 'running'
+          }
+        } else {
+          // 添加新步骤
+          updatedTurns[targetIndex].steps.push({
+            stepIndex: stepIndex,
+            description: `步骤 ${stepIndex + 1}`,
+            status: 'running'
+          })
+          
+          // 按照stepIndex排序步骤
+          updatedTurns[targetIndex].steps.sort((a, b) => a.stepIndex - b.stepIndex)
+        }
+        
         appStore.setTurns(updatedTurns)
       }
     })
