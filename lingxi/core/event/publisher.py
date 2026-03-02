@@ -52,7 +52,9 @@ class EventPublisher:
                 try:
                     callback(**kwargs)
                 except Exception as e:
+                    import traceback
                     self.logger.error(f"处理事件 {event_type} 时发生错误: {e}")
+                    traceback.print_exc()
 
     def get_subscriber_count(self, event_type: Optional[str] = None) -> int:
         """获取订阅者数量

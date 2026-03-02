@@ -1,12 +1,11 @@
 import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from lingxi.__main__ import LingxiAssistant
 from lingxi.utils.config import load_config
 from lingxi.utils.logging import setup_logging
 from lingxi.web.websocket import WebSocketManager
-from lingxi.web.routes import chat, health, tasks, checkpoints, skills, resources, config as config_router
+from lingxi.web.routes import tasks, checkpoints, skills, resources, config as config_router, sessions
 from lingxi.web.state import set_assistant, set_websocket_manager, get_assistant, get_websocket_manager
 from lingxi.core.event.websocket_subscriber import WebSocketSubscriber
 from lingxi.core.event.SessionStore_subscriber import SessionStoreSubscriber
@@ -37,20 +36,14 @@ app.add_middleware(
 )
 
 # 确保路由在模块加载时就注册
-from lingxi.web.routes import chat, health, tasks, checkpoints, skills, resources, config as config_router
+from lingxi.web.routes import tasks, checkpoints, skills, resources, config as config_router, sessions
 
-app.include_router(chat.router, prefix="/api", tags=["chat"])
-app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(tasks.router, prefix="/api", tags=["tasks"])
 app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(resources.router, prefix="/api", tags=["resources"])
 app.include_router(config_router.router, prefix="/api", tags=["config"])
-
-try:
-    app.mount("/static", StaticFiles(directory="lingxi/web/static"), name="static")
-except RuntimeError:
-    logger.warning("静态文件目录不存在，跳过静态文件服务")
+app.include_router(sessions.router, prefix="/api", tags=["sessions"])
 
 
 @app.on_event("startup")
@@ -157,7 +150,6 @@ def run_server(config=None):
 
     logger.info(f"启动FastAPI服务器: http://{host}:{port}")
     logger.info(f"WebSocket端点: ws://{host}:{port}/ws")
-    logger.info(f"Web界面: http://{host}:{port}/static/index.html")
 
     uvicorn.run(
         "lingxi.web.fastapi_server:app",

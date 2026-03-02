@@ -64,11 +64,7 @@ class PromptTemplates:
 
         context = ""
         for msg in session_history[-max_count:]:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role and content:
-                role_name = "用户" if role == "user" else "助手"
-                context += f"{role_name}: {content}\n"
+            context += f"用户:{msg.get("user_input", "")}\n助手:{msg.get("result", "")}\n"
         return context
 
     @staticmethod
@@ -201,7 +197,8 @@ class PromptTemplates:
         history_context: str,
         skills_list: str,
         steps: List[Dict[str, str]],
-        system_info: Optional[Dict[str, str]] = None
+        system_info: Optional[Dict[str, str]] = None,
+        task_plan: str = None
     ) -> List[Dict[str, Any]]:
         """构建ReAct模式消息列表（支持上下文缓存）
 
@@ -234,16 +231,17 @@ Shell类型: {system_info['shell_type']}
 
 任务类型: {task_info.get('level', task_info.get('task_type', '未知'))}
 任务描述: {task_info.get('reason', task_info.get('description', '无'))}
+{task_plan if task_plan else ""}
 
 可用行动:
 {skills_list}
 finish(answer) - 完成任务并返回答案
 
 【重要】必须严格按照以下JSON格式输出，不要包含任何其他文字：
-{{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
+{{"thought": "你的思考过程", "description": "当前步骤简单描述", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
 
 示例：
-{{"thought": "任务已完成，返回最终答案", "action": "finish", "action_input": "任务已成功完成"}}
+{{"thought": "任务已完成，返回最终答案", "description": "当前步骤简单描述", "action": "finish", "action_input": "任务已成功完成"}}
 
 注意事项：
 - 当任务已经完成时，必须使用finish行动结束任务
@@ -287,30 +285,26 @@ finish(answer) - 完成任务并返回答案
         return messages
 
     @staticmethod
-    def build_plan_react_messages_with_cache(
+    def build_task_analysis_messages_with_cache(
         task: str,
-        task_info: Dict[str, Any],
         history_context: str,
-        current_step: str,
         skills_list: str,
-        previous_results: List[Dict[str, Any]],
-        system_info: Optional[Dict[str, str]] = None
+        system_info: Optional[Dict[str, str]] = None,
+        max_plan_steps: int = 8
     ) -> List[Dict[str, Any]]:
-        """构建Plan-ReAct模式步骤消息列表（支持上下文缓存）
+        """构建任务分析消息列表（支持上下文缓存）
 
-        将静态上下文标记为可缓存，动态内容不标记缓存。
+        统一分析任务并输出处理方案，一次LLM调用完成分类+计划+行动。
         缓存策略：
-        - 系统信息、任务信息、技能列表等静态内容标记为缓存
-        - 当前步骤、之前步骤结果等动态内容不标记缓存
+        - 系统信息、工具列表等静态内容标记为缓存
+        - 用户任务、历史上下文等动态内容不标记缓存
 
         Args:
-            task: 任务文本
-            task_info: 任务信息
+            task: 用户任务
             history_context: 历史上下文
-            current_step: 当前步骤描述
             skills_list: 可用技能列表
-            previous_results: 之前步骤的结果
             system_info: 系统信息（可选）
+            max_plan_steps: 最大计划步骤数
 
         Returns:
             消息列表，支持 cache_control 标记
@@ -318,88 +312,49 @@ finish(answer) - 完成任务并返回答案
         if system_info is None:
             system_info = PromptTemplates.get_system_info()
 
-        results_str = PromptTemplates.format_executed_steps(previous_results, include_thought=True, max_prev_length=5000)
-
-        system_prompt = f"""你是灵犀智能助手，使用Plan-ReAct模式解决问题。
+        system_prompt = f"""你是智能任务分析器，需要分析用户任务并输出处理方案。
 
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
 
-任务类型: {task_info.get('level', '未知')}
-任务描述: {task_info.get('reason', '无')}
-
-工具列表:
+可用工具:
 {skills_list}
 finish(answer) - 完成任务并返回答案
 
-【重要】必须严格按照以下JSON格式输出，不要包含任何其他文字：
-{{"thought": "你的思考过程", "action": "行动名称", "action_input": {{"参数名": "参数值"}}}}
+请严格按照以下JSON格式输出，不要包含任何其他文字：
+{{
+  "level": "simple|complex",
+  "confidence": 0.0-1.0,
+  "reason": "分类理由",
+  "direct_answer": "如果是简单问候或可直接回答的问题，在此给出答案",
+  "next_action": {{
+    "thought": "思考过程",
+    "action": "工具名称或finish",
+    "action_input": {{"参数名": "参数值"}} 或 "直接回答字符串"
+  }},
+  "plan": [
+    {{"step": 1, "description": "步骤描述"}},
+    {{"step": 2, "description": "步骤描述"}}
+  ]
+}}
 
-## 格式要求（必须严格遵守，否则解析失败）：
-1. 仅返回JSON字符串，**不要添加任何解释、说明、换行、多余空格**；
-2. JSON字段必须包含：
-   - thought：字符串，描述当前执行思路（简洁，无换行）；
-   - action：字符串，固定值为"xlsx"；
-   - action_input：对象，包含operation（操作类型）、file_path（文件路径，路径分隔符用单斜杠/或双反斜杠\\）；
-3. JSON中所有字符串使用**双引号**包裹，禁止使用单引号；
-4. 禁止出现截断、多余空格（如"当前执 行步骤"这类错误）；
-5. 示例正确格式：
-{{"thought":"读取人员信息.xlsx文件，加载所有工作表数据","action":"xlsx","action_input":{{"operation":"read","file_path":"D:\\resource\\python\\lingxi\\人员信息.xlsx"}}}}
+分类标准：
+- simple: 单一步骤、单工具调用、简单问答（如：查天气、翻译、读取文件、问候）
+- complex: 多步骤、多工具调用、需要规划（如：旅行规划、数据分析、多文件处理）
 
 注意事项：
-- 当任务全部完成时，必须使用finish行动结束任务
-- finish的action_input应该是对用户的最终回答（字符串）
-- 不要在任务完成后继续执行其他行动
-- 必须返回有效的JSON格式，不要包含任何其他文字或说明
-- action_input是参数对象，不是字符串
-- 参数值如果是字符串，必须用双引号包裹
-- 参数值可以包含换行符等特殊字符
-- 在处理长文本文件时（如.txt, .py, .js, .md, .json, .yaml等），使用read_file技能搜索读取文件内容，不要直接加载整个文件内容
-- 读取Excel文件（.xlsx, .xlsm）时，必须使用xlsx技能，不要使用read_file
-"""
+- 如果是simple任务，必须填写next_action字段，plan字段可以为空数组
+- 如果是complex任务，必须填写plan字段，next_action可以为空
+- 如果是问候类或可直接回答的问题，level设为simple，action设为finish，action_input为回答内容
+- 如果是complex任务，plan最多{max_plan_steps}个步骤
+- 每个步骤应该是独立可执行的子任务
+- 必须返回有效的JSON格式"""
 
-        history_part = f"""历史上下文:
-{history_context}"""
+        history_part = f"""历史上下文：
+{history_context if history_context else "无"}"""
 
-        user_input_part = f"""用户输入:
-{task}"""
-
-        current_step_part = f"""当前执行步骤:
-{current_step}"""
-
-        # 将之前步骤的结果拆分为多个部分，为工具使用说明添加缓存
-        results_content = []
-        results_content.append(PromptTemplates.build_cached_text_content("之前步骤的结果:", enable_cache=False))
-        
-        for i, step in enumerate(previous_results):
-            step_header = f"步骤 {i + 1}:"
-            results_content.append(PromptTemplates.build_cached_text_content(step_header, enable_cache=False))
-            
-            if step.get('thought'):
-                thought = f"思考: {step.get('thought', '').replace('\n', '\\n')}"
-                results_content.append(PromptTemplates.build_cached_text_content(thought, enable_cache=False))
-            
-            if step.get('action'):
-                action_input = step.get('action_input', '')
-                if isinstance(action_input, dict):
-                    params_str = ', '.join([f"{k}={v}" for k, v in action_input.items()])
-                    action = f"行动: {step.get('action', '')} - {params_str.replace('\n', '\\n')}"
-                else:
-                    action = f"行动: {step.get('action', '')} - {str(action_input).replace('\n', '\\n')}"
-                results_content.append(PromptTemplates.build_cached_text_content(action, enable_cache=False))
-            
-            if step.get('observation'):
-                observation = step.get('observation', '')
-                is_tool_guide = 'Skill Usage Guide' in observation or '技能使用说明' in observation or 'XLSX技能使用说明' in observation
-                if is_tool_guide:
-                    results_content.append(PromptTemplates.build_cached_text_content(f"观察: {observation.replace('\n', '\\n')}", enable_cache=True))
-                else:
-                    results_content.append(PromptTemplates.build_cached_text_content(f"观察: {observation.replace('\n', '\\n')}", enable_cache=False))
-            
-            results_content.append(PromptTemplates.build_cached_text_content("", enable_cache=False))
-        
-        results_content.append(PromptTemplates.build_cached_text_content("现在请输出下一步:", enable_cache=False))
+        user_input_part = f"""用户任务：{task}"""
 
         messages = [
             {
@@ -409,75 +364,25 @@ finish(answer) - 完成任务并返回答案
             {
                 "role": "user",
                 "content": [
-                    PromptTemplates.build_cached_text_content(history_part, enable_cache=True),
-                    PromptTemplates.build_cached_text_content(user_input_part, enable_cache=True),
-                    PromptTemplates.build_cached_text_content(current_step_part, enable_cache=False)
+                    PromptTemplates.build_cached_text_content(history_part, enable_cache=False),
+                    PromptTemplates.build_cached_text_content(user_input_part, enable_cache=False)
                 ]
             }
         ]
-        
-        # 将之前步骤的结果添加到用户消息中
-        messages[1]["content"].extend(results_content)
 
         return messages
 
     @staticmethod
-    def build_task_planning_messages_with_cache(
-        task: str,
-        task_info: Dict[str, Any],
-        history_context: str,
-        system_info: Optional[Dict[str, str]] = None
-    ) -> List[Dict[str, Any]]:
-        """构建任务规划消息列表（支持上下文缓存）
+    def format_task_plan(task_plan: List[str]) -> str:
+        """格式化任务计划
 
         Args:
-            task: 任务文本
-            task_info: 任务信息
-            history_context: 历史上下文
-            system_info: 系统信息（可选）
+            task_plan: 原始任务计划字符串
 
         Returns:
-            消息列表，支持 cache_control 标记
+            格式化后的任务计划字符串
         """
-        if system_info is None:
-            system_info = PromptTemplates.get_system_info()
-
-        system_prompt = f"""请为用户输入生成详细的任务规划，包括具体的步骤。
-
-要求：
-- 每个步骤一行，以数字开头
-- 步骤描述要具体、可执行
-- 不要使用Markdown格式
-- 不要添加任何解释、标题、分隔线或其他格式
-"""
-
-        history_part = f"""任务类型: {task_info.get('level', '未知')}
-任务描述: {task_info.get('reason', '无')}
-
-历史上下文:
-{history_context}"""
-
-        user_input_part = f"""用户输入:
-{task}
-
-【重要】必须严格按照以下格式输出，不要包含任何其他内容：
-1. 第一步的具体描述
-2. 第二步的具体描述
-3. 第三步的具体描述
-..."""
-
-        messages = [
-            {
-                "role": "system",
-                "content": [PromptTemplates.build_cached_text_content(system_prompt, enable_cache=True)]
-            },
-            {
-                "role": "user",
-                "content": [
-                    PromptTemplates.build_cached_text_content(history_part, enable_cache=True),
-                    PromptTemplates.build_cached_text_content(user_input_part, enable_cache=True)
-                ]
-            }
-        ]
-
-        return messages
+        res_str=''
+        for index,step in enumerate(task_plan):
+            res_str += f"{index+1}. {step.strip().replace("\n", " ")} "
+        return f"任务计划: {res_str if len(task_plan) > 1 else ""}" 

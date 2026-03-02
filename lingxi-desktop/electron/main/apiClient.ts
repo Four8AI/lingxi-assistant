@@ -169,4 +169,8 @@ export class ApiClient {
   async updateConfig(config: Partial<Config>): Promise<void> {
     return this.client.patch('/api/config', config)
   }
+
+  async getSessionInfo(sessionId: string): Promise<any> {
+    return this.client.get(`/api/sessions/${sessionId}`)
+  }
 }

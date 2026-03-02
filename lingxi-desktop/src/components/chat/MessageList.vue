@@ -16,13 +16,15 @@
         <div class="message-header">
           <span class="message-role">{{ turn.role === 'user' ? '用户' : '助手' }}</span>
           <span class="message-time">{{ formatTime(turn.time || turn.timestamp) }}</span>
-          <span v-if="turn.status" class="message-status" :class="turn.status">{{ turn.status === 'running' ? '执行中' : turn.status === 'completed' ? '已完成' : '失败' }}</span>
+          <span v-if="turn.status" class="message-status" :class="turn.status">
+            {{ turn.status === 'running' ? '执行中' : turn.status === 'completed' ? '已完成' : '失败' }}
+          </span>
         </div>
 
-        <div v-if="turn.plan" class="message-plan">
+        <div v-if="getPlanSteps(turn.plan).length > 0" class="message-plan">
           <div class="plan-label">执行计划：</div>
           <div class="plan-steps">
-            <div v-for="(step, index) in turn.plan.steps" :key="index" class="plan-step">
+            <div v-for="(step, index) in getPlanSteps(turn.plan)" :key="index" class="plan-step">
               {{ index + 1 }}. {{ step }}
             </div>
           </div>
@@ -32,7 +34,7 @@
           <div class="steps-list">
             <div v-for="(step, index) in turn.steps" :key="index" class="step-item" :class="step.status">
               <div class="step-header" @click="toggleStepExpand(turn.id, index)">
-                <span class="step-index">{{ step.stepIndex + 1 }}.</span>
+                <span class="step-index">{{ Number(step.step_id) + 1 }}.</span>
                 <span class="step-description">{{ step.description }}</span>
                 <span class="step-status">{{ step.status === 'running' ? '执行中' : step.status === 'completed' ? '已完成' : '失败' }}</span>
                 <span class="step-expand-icon">{{ isStepExpanded(turn.id, index) ? '▼' : '▶' }}</span>
@@ -54,9 +56,9 @@
             <h3 class="message-text-title">最终结果</h3>
             <div class="message-text" v-html="renderMarkdown(turn.content)" />
           </div>
-          <div v-else class="message-text" v-html="renderMarkdown(turn.content)" />
+          <div v-else class="message-text-user" v-html="renderMarkdown(turn.content)" />
         </div>
-        <div v-else class="message-text-container streaming">
+        <div v-else-if="turn.isStreaming || hasRunningSteps(turn)" class="message-text-container streaming">
           <div class="streaming-indicator">
             <el-icon class="is-loading"><Loading /></el-icon>
             <span>正在生成回复...</span>
@@ -81,7 +83,6 @@ import { useAppStore } from '../../stores/app'
 import { storeToRefs } from 'pinia'
 import { User, ChatDotRound, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import ThoughtChainPanel from './ThoughtChainPanel.vue'
 import StepInterventionCard from './StepInterventionCard.vue'
 import { marked } from 'marked'
 
@@ -113,6 +114,26 @@ function formatTime(timestamp: number): string {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
+function getPlanSteps(plan: any): string[] {
+  if (!plan) return []
+  
+  try {
+    // 如果已经是数组，直接返回
+    if (Array.isArray(plan)) {
+      return plan
+    }
+    // 如果是字符串，尝试解析JSON
+    if (typeof plan === 'string') {
+      const parsed = JSON.parse(plan)
+      return Array.isArray(parsed) ? parsed : []
+    }
+    return []
+  } catch (e) {
+    console.error('解析执行计划失败:', e)
+    return []
+  }
+}
+
 function renderMarkdown(content: any): string {
   if (!content) return ''
   
@@ -136,8 +157,6 @@ function renderMarkdown(content: any): string {
   
   // 处理字符串格式的内容（Markdown）
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content)
-  
-  console.log('Rendering content:', contentStr)
   
   // 提取最终结果部分，只显示最终结果
   if (contentStr.includes('# 最终结果')) {
@@ -174,6 +193,9 @@ function hasFailedSteps(turn: any): boolean {
 
 function hasRunningSteps(turn: any): boolean {
   if (turn.status === 'running') {
+    return true
+  }
+  if (turn.isStreaming) {
     return true
   }
   if (turn.steps && turn.steps.some((s: any) => s.status === 'running')) {

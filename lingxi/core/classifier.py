@@ -3,6 +3,7 @@ import json
 import re
 from typing import Dict, Optional, Any
 from lingxi.core.llm_client import LLMClient
+from lingxi.core.prompts import PromptTemplates
 
 
 class TaskClassifier:
@@ -25,35 +26,39 @@ class TaskClassifier:
 
         self.logger.debug(f"初始化任务分类器，策略: {self.strategy}")
 
-    def classify(self, task_text: str) -> Dict[str, Any]:
+    def classify(self, task_text: str, history: Optional[list] = None) -> Dict[str, Any]:
         """分类用户任务
 
         Args:
             task_text: 任务文本
+            history: 历史对话上下文
 
         Returns:
             包含任务级别、置信度和理由的字典
         """
         self.logger.debug(f"分类任务: {task_text}")
+        if history:
+            self.logger.debug(f"历史上下文: {len(history)} 条")
 
         if self.strategy == "llm_first":
-            return self._llm_first_classify(task_text)
+            return self._llm_first_classify(task_text, history)
         elif self.strategy == "rule_first":
-            return self._rule_first_classify(task_text)
+            return self._rule_first_classify(task_text, history)
         else:
-            return self._llm_first_classify(task_text)
+            return self._llm_first_classify(task_text, history)
 
-    def _llm_first_classify(self, task_text: str) -> Dict[str, Any]:
+    def _llm_first_classify(self, task_text: str, history: Optional[list] = None) -> Dict[str, Any]:
         """优先使用LLM分类
 
         Args:
             task_text: 任务文本
+            history: 历史对话上下文
 
         Returns:
             分类结果
         """
         try:
-            llm_result = self._llm_classify(task_text)
+            llm_result = self._llm_classify(task_text, history)
             if llm_result["confidence"] >= self.llm_confidence_threshold:
                 self.logger.debug(f"LLM分类结果: {llm_result}")
                 return llm_result
@@ -66,11 +71,12 @@ class TaskClassifier:
         else:
             return {"level": "simple", "confidence": 0.5, "reason": "LLM分类失败且未启用规则fallback"}
 
-    def _rule_first_classify(self, task_text: str) -> Dict[str, Any]:
+    def _rule_first_classify(self, task_text: str, history: Optional[list] = None) -> Dict[str, Any]:
         """优先使用规则分类
 
         Args:
             task_text: 任务文本
+            history: 历史对话上下文
 
         Returns:
             分类结果
@@ -80,22 +86,25 @@ class TaskClassifier:
             return rule_result
 
         try:
-            llm_result = self._llm_classify(task_text)
+            llm_result = self._llm_classify(task_text, history)
             self.logger.debug(f"LLM分类结果: {llm_result}")
             return llm_result
         except Exception as e:
             self.logger.warning(f"LLM分类失败: {e}")
             return rule_result
 
-    def _llm_classify(self, task_text: str) -> Dict[str, Any]:
+    def _llm_classify(self, task_text: str, history: Optional[list] = None) -> Dict[str, Any]:
         """使用LLM进行分类
 
         Args:
             task_text: 任务文本
+            history: 历史对话上下文
 
         Returns:
             分类结果
         """
+        history_text = PromptTemplates.format_history_context(history)
+        
         prompt = f"""你是任务分类器，将用户请求分为三级：
 trivial：无需工具，直接回答（如问候、简单问答）
 simple：单一步骤、单工具调用（如查天气、翻译）
@@ -103,6 +112,7 @@ complex：多步骤、多工具调用（如旅行规划、数据分析）
 
 输出JSON格式：
 {{"level": "trivial|simple|complex", "confidence": 0.0-1.0, "reason": "理由"}}
+{history_text}
 
 用户请求：{task_text}
 """

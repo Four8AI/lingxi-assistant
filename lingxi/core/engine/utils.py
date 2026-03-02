@@ -39,6 +39,7 @@ def parse_llm_response(response: str) -> Optional[Dict[str, Any]]:
             return {
                 "thought": result["thought"],
                 "action": result["action"],
+                "description": result.get("description", ""),
                 "action_input": action_input,
                 "content": content
             }
@@ -84,6 +85,7 @@ def parse_llm_response(response: str) -> Optional[Dict[str, Any]]:
                                     return {
                                         "thought": result["thought"],
                                         "action": result["action"],
+                                        "description": result.get("description", ""),
                                         "action_input": action_input,
                                         "content": content
                                     }

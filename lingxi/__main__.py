@@ -8,6 +8,7 @@ from lingxi.core.session import SessionManager
 from lingxi.core.classifier import TaskClassifier
 from lingxi.core.mode_selector import ExecutionModeSelector
 from lingxi.core.skill_caller import SkillCaller
+from lingxi.core.event.console_subscriber import ConsoleSubscriber
 
 
 class LingxiAssistant:
@@ -33,6 +34,7 @@ class LingxiAssistant:
         self.classifier = TaskClassifier(self.config)
         self.skill_caller = SkillCaller(self.config)
         self.mode_selector = ExecutionModeSelector(self.config, self.skill_caller)
+        self.console_subscriber = ConsoleSubscriber()
 
     def process_input(self, user_input: str, session_id: str = "default", stream: bool = False) -> Union[str, Any]:
         """处理用户输入
@@ -47,8 +49,6 @@ class LingxiAssistant:
         """
         self.logger.debug(f"处理用户输入: {user_input}")
 
-        self.session_manager.add_turn(session_id, "user", user_input)
-
         try:
             # 先检查是否是安装技能的请求
             install_result = self._check_install_skill_intent(user_input)
@@ -59,29 +59,24 @@ class LingxiAssistant:
                     response = f"技能安装成功: {skill_path}"
                 else:
                     response = f"技能安装失败: {skill_path}"
-                self.session_manager.add_turn(session_id, "assistant", response)
                 return response
 
-            task_info = self.classifier.classify(user_input)
-            self.logger.debug(f"任务分类: {task_info}")
-
-            mode = self.mode_selector.select_mode(task_info["level"])
-            self.logger.debug(f"选择执行模式: {mode}")
-
-            engine = self.mode_selector.get_engine(mode, self.session_manager)
-
             history = self.session_manager.get_history(session_id)
+            #task_info = self.classifier.classify(user_input, history)
+            #self.logger.debug(f"任务分类: {task_info}")
+
+            #mode = self.mode_selector.select_mode(task_info["level"])
+            #self.logger.debug(f"选择执行模式: {mode}")
+
+            engine = self.mode_selector.get_engine(mode="plan_react", session_manager=self.session_manager)
 
             response = engine.process(
                 user_input=user_input,
-                task_info=task_info,
+                task_info={"level": "complex"},
                 session_history=history,
                 session_id=session_id,
                 stream=stream
             )
-
-            if not stream:
-                self.session_manager.add_turn(session_id, "assistant", response)
 
             return response
 
@@ -90,7 +85,6 @@ class LingxiAssistant:
             error_trace = traceback.format_exc()
             self.logger.error(f"处理失败: {e}\n{error_trace}")
             error_response = f"抱歉，处理您的请求时出现错误：{str(e)}\n\n堆栈信息:\n{error_trace}"
-            self.session_manager.add_turn(session_id, "assistant", error_response)
             if stream:
                 def error_generator():
                     yield {"type": "error", "message": error_response}
@@ -334,132 +328,23 @@ class LingxiAssistant:
             print("-" * 80)
 
     def _process_stream_response(self, response_generator: Any, final_response: List[str]):
-        """处理流式响应
+        """处理流式响应 - 使用事件订阅者自动处理输出
 
         Args:
             response_generator: 流式响应生成器
             final_response: 最终响应列表
         """
-        if hasattr(response_generator, '__next__') or hasattr(response_generator, 'send'):
-            try:
-                while True:
-                    chunk = next(response_generator)
-                    if isinstance(chunk, dict):
-                        # 处理结构化流式数据
-                        if chunk.get('type') == 'task_start':
-                            print("\n任务处理开始 (task_start)")
-                        elif chunk.get('type') == 'think_start':
-                            print("思考:")
-                        elif chunk.get('type') == 'stream':
-                            # 处理思考流式内容
-                            content = chunk.get('content', '')
-                            print(f"{content}",end="")
-                        elif chunk.get('type') == 'think_final':
-                            print("思考结束")
-                        elif chunk.get('type') == 'plan_start':
-                            #print("任务规划\n")
-                            continue
-                        elif chunk.get('type') == 'plan_final':
-                            print("任务规划完成:")
-                            steps = chunk.get('steps', [])
-                            for i, step in enumerate(steps):
-                                print(f"   步骤 {i+1}: {step.get('description', 'N/A')}")
-                        elif chunk.get('type') == 'step_start':
-                            step_idx = chunk.get('step', 0)
-                            print(f"步骤开始 (step_start) - 步骤 {step_idx}")
-                        elif chunk.get('type') == 'step_complete':
-                            print("步骤执行结束 (step_end)")
-                            observation = chunk.get('observation', '')
-                            if observation:
-                                print(f"观察结果: {observation[:100]}...")
-                        elif chunk.get('type') == 'task_end':
-                            result = chunk.get('result', '')
-                        elif chunk.get('type') == 'finish':
-                            result = chunk.get('result', '')
-                            print(f"最终结果: {result}")
-                            final_response.append(result)
-                        elif chunk.get('type') == 'error':
-                            print(f"错误: {chunk.get('message', '未知错误')}")
-                            break
-                    elif hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                        # 处理 LLM 原始流式响应对象
-                        choice = chunk.choices[0]
-                        if hasattr(choice, 'delta'):
-                            delta = choice.delta
-                            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                                # 思考阶段
-                                reasoning_chunk = delta.reasoning_content
-                                print(f"└─ 思考块流式渲染 (think_stream): {reasoning_chunk}")
-                            elif hasattr(delta, 'content') and delta.content:
-                                # 回复阶段
-                                text_chunk = delta.content
-                                final_response.append(text_chunk)
-                    elif hasattr(chunk, 'usage'):
-                        # 处理结束的 usage 信息，不显示给用户
-                        pass
-                    elif hasattr(chunk, '__next__') or hasattr(chunk, 'send'):
-                        # 处理嵌套的生成器
-                        nested_generator = chunk
-                        try:
-                            while True:
-                                nested_chunk = next(nested_generator)
-                                if isinstance(nested_chunk, dict):
-                                    if nested_chunk.get('type') == 'task_start':
-                                        print("\n任务处理开始 (task_start)")
-                                    elif nested_chunk.get('type') == 'think_start':
-                                        print("思考:")
-                                    elif nested_chunk.get('type') == 'stream':
-                                        # 处理思考流式内容
-                                        content = nested_chunk.get('content', '')
-                                        print(f"{content}",end="")
-                                    elif nested_chunk.get('type') == 'think_final':
-                                        print("思考结束")
-                                    elif nested_chunk.get('type') == 'plan_start':
-                                        #print("任务规划\n")
-                                        continue
-                                    elif nested_chunk.get('type') == 'plan_final':
-                                        print("任务规划完成:")
-                                        steps = nested_chunk.get('steps', [])
-                                        for i, step in enumerate(steps):
-                                            print(f"   步骤 {i+1}: {step.get('description', 'N/A')}")
-                                    elif nested_chunk.get('type') == 'step_start':
-                                        step_idx = nested_chunk.get('step', 0)
-                                        print(f"步骤开始 (step_start) - 步骤 {step_idx}")
-                                    elif nested_chunk.get('type') == 'step_complete':
-                                        print("步骤执行结束 (step_end)")
-                                        observation = nested_chunk.get('observation', '')
-                                        if observation:
-                                            print(f"观察结果: {observation[:100]}...")
-                                    elif nested_chunk.get('type') == 'task_end':
-                                        result = nested_chunk.get('result', '')
-                                        print(f"任务处理结束 (task_end) - 结果: {result}")
-                                    elif nested_chunk.get('type') == 'finish':
-                                        result = nested_chunk.get('result', '')
-                                        print(f"最终结果: {result}")
-                                        final_response.append(result)
-                                    elif nested_chunk.get('type') == 'error':
-                                        print(f"错误: {nested_chunk.get('message', '未知错误')}")
-                                        break
-                                elif hasattr(nested_chunk, 'choices') and len(nested_chunk.choices) > 0:
-                                    # 处理嵌套的 LLM 原始流式响应对象
-                                    choice = nested_chunk.choices[0]
-                                    if hasattr(choice, 'delta'):
-                                        delta = choice.delta
-                                        if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                                            # 思考阶段
-                                            reasoning_chunk = delta.reasoning_content
-                                            print(f"{reasoning_chunk}",end="")
-                                        elif hasattr(delta, 'content') and delta.content:
-                                            # 回复阶段
-                                            text_chunk = delta.content
-                                            final_response.append(text_chunk)
-                        except StopIteration:
-                            pass
-                    else:
-                        # 处理其他类型的块，避免显示内部对象
-                        pass
-            except StopIteration:
-                pass
+        try:
+            for chunk in response_generator:
+                if isinstance(chunk, dict):
+                    if chunk.get('type') == 'finish':
+                        result = chunk.get('result', '')
+                        final_response.append(result)
+                    elif chunk.get('type') == 'error':
+                        print(f"❌ 错误: {chunk.get('message', '未知错误')}")
+                        break
+        except StopIteration:
+            pass
 
     def interactive_mode(self, session_id: str = "default"):
         """交互式模式
@@ -501,9 +386,6 @@ class LingxiAssistant:
                     final_response = []
                     self._process_stream_response(response_generator, final_response)
                     
-                    final_response_str = ''.join(final_response)
-                    if final_response_str:
-                        self.session_manager.add_turn(session_id, "assistant", final_response_str)
                     print()  # 换行
                 else:
                     # 非流式输出模式

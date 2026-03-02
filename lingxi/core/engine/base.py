@@ -6,20 +6,17 @@ import threading
 from typing import Dict, List, Optional, Any, Union, Generator
 from lingxi.core.llm_client import LLMClient
 from lingxi.core.skill_caller import SkillCaller
+from lingxi.core.session import SessionManager
 from lingxi.core.prompts import PromptTemplates
 from lingxi.core.event import global_event_publisher
+from lingxi.core.context import set_ids, local_context
 from .utils import parse_llm_response, parse_action_parameters, process_parameters, calculate_expression
 from lingxi.utils.json_parser import stream_with_thought_only
-
-
-# 创建线程局部存储
-local_context = threading.local()
-
 
 class BaseEngine:
     """引擎基类，提供公共功能"""
 
-    def __init__(self, config: Dict[str, Any], skill_caller: SkillCaller = None, session_manager=None, websocket_manager=None):
+    def __init__(self, config: Dict[str, Any], skill_caller: SkillCaller = None, session_manager: SessionManager = None, websocket_manager=None):
         """初始化引擎
 
         Args:
@@ -50,21 +47,6 @@ class BaseEngine:
             系统响应（非流式）或流式响应生成器（流式）
         """
         raise NotImplementedError("子类必须实现 process 方法")
-
-    def stream_process(self, user_input: str, task_info: Dict[str, Any], session_history: List[Dict[str, str]] = None, 
-                      session_id: str = "default") -> Generator[Dict[str, Any], None, None]:
-        """流式处理用户输入
-
-        Args:
-            user_input: 用户输入
-            task_info: 任务信息
-            session_history: 会话历史
-            session_id: 会话ID
-
-        Returns:
-            流式响应生成器
-        """
-        return self.process(user_input, task_info, session_history, session_id, stream=True)
 
     def _build_history_context(self, session_history: List[Dict[str, str]]) -> str:
         """构建历史上下文
@@ -165,17 +147,16 @@ class BaseEngine:
         """
         return calculate_expression(expression)
 
-    def _generate_final_response(self, task: str, results: List[Dict[str, Any]], task_level: str = "simple", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
+    def _generate_final_response(self, task: str, results: List[Dict[str, Any]], task_level: str = "simple") -> str:
         """生成最终响应
 
         Args:
             task: 任务文本
             results: 执行结果
             task_level: 任务级别
-            stream: 是否启用流式输出
 
         Returns:
-            最终响应（非流式）或流式响应生成器（流式）
+            最终响应
         """
         prompt = PromptTemplates.build_final_response_prompt(
             user_input=task,
@@ -183,58 +164,10 @@ class BaseEngine:
             include_thought=False
         )
 
-        if not stream:
-            self.logger.debug("生成最终响应提示词: %s", prompt)
-            response = self.llm_client.complete(prompt, task_level=task_level)
-            self.logger.debug("最终响应LLM响应: %s", response)
-            return response
-        else:
-            return self._generate_final_response_with_stream(task, results, task_level)
-
-    def _generate_final_response_with_stream(self, task: str, results: List[Dict[str, Any]], task_level: str = "simple") -> Generator[Dict[str, Any], None, None]:
-        """流式生成最终响应
-
-        Args:
-            task: 任务文本
-            results: 执行结果
-            task_level: 任务级别
-
-        Returns:
-            流式响应生成器
-        """
-        def stream_generator():
-            prompt = PromptTemplates.build_final_response_prompt(
-                user_input=task,
-                steps=results,
-                include_thought=False
-            )
-
-            self.logger.debug("流式生成最终响应提示词: %s", prompt)
-            
-            # 流式调用LLM
-            stream_response = self.llm_client.stream_complete(prompt, task_level=task_level)
-            
-            # 收集流式响应
-
-            full_response = ""
-            for chunk in stream_response:
-                if hasattr(chunk, 'choices') and chunk.choices:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, "reasoning_content") and delta.reasoning_content is not None:
-                        self.logger.debug("思考内容1: %s", delta.reasoning_content)
-                        self._publish_think_stream(session_id, execution_id, step_idx, delta.reasoning_content)
-                    if hasattr(delta, "content") and delta.content is not None:
-                        full_response += delta.content
-                        yield {"type": "stream", "content": delta.content}
-
-            # 发布最终响应完成事件
-            yield {
-                "type": "finish",
-                "result": full_response
-            }
-            self.logger.debug("最终响应LLM响应: %s", full_response)
-        
-        return stream_generator()
+        self.logger.debug("生成最终响应提示词: %s", prompt)
+        response = self.llm_client.complete(prompt, task_level=task_level)
+        self.logger.debug("最终响应LLM响应: %s", response)
+        return response
 
     def _generate_error_response(self, task: str, failed_step: int, error: str) -> str:
         """生成错误响应
@@ -352,7 +285,7 @@ class BaseEngine:
             total_steps=total_steps
         )
 
-    def _publish_step_end(self, session_id: str, execution_id: str, step_idx: int, status: str, error: str = None, result: str = "", thought: str = ""):
+    def _publish_step_end(self, session_id: str, execution_id: str, step_idx: int, status: str, error: str = None, result: str = "", thought: str = "",description:str=""):
         """发布步骤结束事件
 
         Args:
@@ -373,7 +306,8 @@ class BaseEngine:
             status=status,
             error=error,
             result=result,
-            thought=thought
+            thought=thought,
+            description=description
         )
 
     def _publish_task_end(self, session_id: str, execution_id: str, result: str):
@@ -385,11 +319,13 @@ class BaseEngine:
             result: 结果
         """
         task_id = getattr(local_context, 'task_id', None)
+        task = getattr(local_context, 'task', None)
         global_event_publisher.publish(
             'task_end',
             session_id=session_id,
             execution_id=execution_id,
             task_id=task_id,
+            task_input=task,
             result=result
         )
         # 返回task_end事件
@@ -397,6 +333,22 @@ class BaseEngine:
             "type": "task_end",
             "result": result
         }
+    def _publish_task_failed(self, session_id: str, execution_id: str, error: str):
+        """发布任务失败事件
+
+        Args:
+            session_id: 会话ID
+            execution_id: 执行ID
+            error: 错误信息
+        """
+        task_id = getattr(local_context, 'task_id', None)
+        global_event_publisher.publish(
+            'task_failed',
+            session_id=session_id,
+            execution_id=execution_id,
+            task_id=task_id,
+            error=error
+        )
 
     def _process_llm_response(self, messages: List[Dict[str, Any]], task_level: str, stream: bool) -> Generator[Dict[str, Any], None, None]:
         """处理LLM响应
@@ -454,25 +406,18 @@ class BaseEngine:
                 "response": response
             }
 
-    def _handle_finish_action(self, parsed: Dict[str, Any], steps: List[Dict[str, Any]]) -> Generator[Dict[str, Any], None, None]:
+    def _handle_finish_action(self, parsed: Dict[str, Any], steps: List[Dict[str, Any]]):
         """处理finish行动
 
         Args:
             parsed: 解析后的响应
             steps: 已执行步骤
-
-        Returns:
-            流式响应生成器
         """
         self.logger.debug("任务完成")
         final_answer = parsed.get("thought", "") + " " + parsed.get("observation", "")
-        yield {
-            "type": "finish",
-            "result": final_answer,
-            "steps": steps + [parsed]
-        }
+        steps.append(parsed)
 
-    def _handle_step_complete(self, parsed: Dict[str, Any], step: int) -> Generator[Dict[str, Any], None, None]:
+    def _handle_step_complete(self, parsed: Dict[str, Any], step: int) -> Dict[str, Any]:
         """处理步骤完成
 
         Args:
@@ -480,7 +425,7 @@ class BaseEngine:
             step: 步骤索引
 
         Returns:
-            流式响应生成器
+            步骤完成信息
         """
         observation = self._execute_action(parsed.get("action"), parsed.get("action_input"))
         parsed["observation"] = observation
@@ -489,7 +434,7 @@ class BaseEngine:
         self.logger.debug(f"行动: {parsed.get('action')} - {parsed.get('action_input')}")
         self.logger.debug(f"观察: {observation.replace(chr(10), chr(92) + 'n')}")
 
-        yield {
+        return {
             "type": "step_complete",
             "step": step,
             "thought": parsed.get('thought'),
@@ -501,7 +446,7 @@ class BaseEngine:
 
     def _execute_task_stream(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
                            session_id: str, execution_id: str, stream: bool) -> Generator[Dict[str, Any], None, None]:
-        """执行任务（流式）
+        """执行任务
 
         Args:
             task: 任务文本
@@ -512,25 +457,9 @@ class BaseEngine:
             stream: 是否启用流式输出
 
         Returns:
-            流式响应生成器
+            响应生成器
         """
         raise NotImplementedError("子类必须实现 _execute_task_stream 方法")
-
-    def _execute_task_sync(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
-                          session_id: str, execution_id: str) -> Generator[Dict[str, Any], None, None]:
-        """执行任务（同步）
-
-        Args:
-            task: 任务文本
-            task_info: 任务信息
-            history: 会话历史
-            session_id: 会话ID
-            execution_id: 执行ID
-
-        Returns:
-            流式响应生成器
-        """
-        raise NotImplementedError("子类必须实现 _execute_task_sync 方法")
 
     def _execute_new_task(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]] = None,
                          session_id: str = "default", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
@@ -549,43 +478,22 @@ class BaseEngine:
         try:
             self.logger.debug(f"开始执行新任务：{task} (stream={stream})")
             task_id = f"task_{session_id}_{uuid.uuid4().hex[:8]}"
-            local_context.task_id = task_id
-            self.logger.debug(f"生成任务ID：{task_id}")
             execution_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
-            local_context.execution_id = execution_id
-            local_context.session_id = session_id
+            set_ids(session_id,task_id,execution_id,task);
+            self.logger.debug(f"生成任务ID：{task_id}")
             self.logger.debug(f"生成执行ID：{execution_id}")
-            global_event_publisher.publish(
-                'task_start',
-                session_id=session_id,
-                execution_id=execution_id,
-                task_id=task_id,
-                task_info=task_info,
-                user_input=task
-            )
-
-            history_context = self._build_history_context(history)
+            self._publish_task_start(session_id, execution_id, task, task_info)
 
             def stream_generator():
-                if stream:
-                    for chunk in self._execute_task_stream(task, task_info, history, session_id, execution_id, stream):
-                        yield chunk
-                else:
-                    for chunk in self._execute_task_sync(task, task_info, history, session_id, execution_id):
-                        yield chunk
+                for chunk in self._execute_task_stream(task, task_info, history, session_id, execution_id, stream):
+                    yield chunk
 
             if stream:
                 return stream_generator()
             else:
-                result_parts = []
-                for chunk in stream_generator():
-                    if chunk.get("type") == "stream":
-                        result_parts.append(chunk.get("content", ""))
-                    elif chunk.get("type") == "finish":
-                        return chunk.get("result", "")
-                    elif chunk.get("type") == "error":
-                        return chunk.get("message", "错误")
-                return "".join(result_parts)
+                for _ in stream_generator():
+                    pass
+                return ""
 
         except Exception as e:
             import traceback
@@ -633,13 +541,8 @@ class BaseEngine:
 
         self._publish_task_end(session_id, execution_id, final_response)
 
-        yield {
-            "type": "finish",
-            "result": final_response
-        }
-
-    def _handle_step_failure(self, step_result: Dict[str, Any], checkpoint: Dict[str, Any], 
-                           session_id: str, execution_id: str, step_idx: int, task: str) -> Generator[Dict[str, Any], None, None]:
+    def _handle_step_failure(self, step_result: Dict[str, Any], checkpoint: Dict[str, Any],
+                           session_id: str, execution_id: str, step_idx: int, task: str):
         """处理步骤失败
 
         Args:
@@ -649,9 +552,6 @@ class BaseEngine:
             execution_id: 执行ID
             step_idx: 步骤索引
             task: 任务文本
-
-        Returns:
-            流式响应生成器
         """
         self.logger.error(f"步骤{step_idx + 1}执行失败: {step_result.get('error')}")
 
@@ -662,18 +562,22 @@ class BaseEngine:
 
         if self.session_manager:
             error_response = self._generate_error_response(task, step_idx, step_result.get("error"))
-            self.session_manager.add_turn(
-                session_id=session_id,
-                role="assistant",
-                content=error_response,
-                metadata={
-                    "action": "task_failed",
-                    "failed_step": step_idx + 1,
-                    "error": step_result.get("error")
-                }
-            )
+            
+    def _publish_task_start(self, session_id: str, execution_id: str, task: str, task_info: Dict[str, Any]):
+        """发布任务开始事件
 
-        yield {
-            "type": "error",
-            "message": error_response
-        }
+        Args:
+            session_id: 会话ID
+            execution_id: 执行ID
+            task: 任务文本
+            task_info: 任务信息
+        """
+        task_id = getattr(local_context, 'task_id', None)
+        global_event_publisher.publish(
+                'task_start',
+                session_id=session_id,
+                execution_id=execution_id,
+                task_id=task_id,
+                task_info=task_info,
+                user_input=task
+        )

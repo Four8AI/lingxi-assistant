@@ -10,7 +10,6 @@ from pydantic_core.core_schema import nullable_schema
 from lingxi.core.classifier import TaskClassifier
 from lingxi.core.llm_client import LLMClient
 from lingxi.context.manager import ContextManager, ContentType
-from test_task_description_simple import task_info
 
 
 @dataclass
@@ -18,6 +17,8 @@ class Step:
     """任务步骤实体类（使用dataclass）"""
     step_id: str
     step_type: str
+    description: str = ""
+    status: str = "completed"
     thought: str = ""
     result: str = ""
     skill_call: str = ""
@@ -43,7 +44,7 @@ class Session:
     """会话实体类（使用dataclass）"""
     session_id: str
     user_name: str = "default"
-    history_json: str = "[]"
+    title: str = "新会话"
     checkpoint_json: str = "{}"
     token_count: int = 0
     task_list: Dict[str, Task] = field(default_factory=dict)
@@ -85,7 +86,7 @@ class SessionManager:
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 user_name TEXT DEFAULT 'default',
-                history_json TEXT,
+                title TEXT DEFAULT '新会话',
                 checkpoint_json TEXT,
                 task_list TEXT,
                 token_count INTEGER DEFAULT 0,
@@ -106,32 +107,40 @@ class SessionManager:
         Returns:
             会话历史记录
         """
-        if max_turns is None:
-            max_turns = self.max_history_turns
-
-        # 确保会话在缓存中且类型正确
-        if session_id not in self.memory_cache or not hasattr(self.memory_cache[session_id], 'history_json'):
+        # 确保会话在缓存中
+        if session_id not in self.memory_cache:
             self.memory_cache[session_id] = Session(session_id=session_id)
-        
-        # 从数据库加载历史记录（如果缓存中没有）
-        if not self.memory_cache[session_id].history_json:
+
+        # 从数据库加载 task_list（如果缓存中没有）
+        if not hasattr(self.memory_cache[session_id], 'task_list') or not self.memory_cache[session_id].task_list:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT history_json FROM sessions WHERE session_id = ?", (session_id,))
+            cursor.execute("SELECT task_list FROM sessions WHERE session_id = ?", (session_id,))
             row = cursor.fetchone()
             conn.close()
 
+            task_list = {}
             if row and row[0]:
-                self.memory_cache[session_id].history_json = row[0]
-            else:
-                self.memory_cache[session_id].history_json = "[]"
-        
-        # 解析历史记录
-        history = json.loads(self.memory_cache[session_id].history_json)
-        if not isinstance(history, list):
-            history = []
-            
-        return history[-max_turns:]
+                try:
+                    task_list = json.loads(row[0])
+                    if task_list and not isinstance(task_list, dict):
+                        task_list = {}
+                except json.JSONDecodeError:
+                    task_list = {}
+
+            self.memory_cache[session_id].task_list = task_list
+
+        # 从 task_list 组装 history
+        task_list = self.memory_cache[session_id].task_list
+
+        # 遍历任务，按时间顺序排序
+        sorted_tasks = sorted(task_list.values(), key=lambda t: t.get('created_at', 0) if isinstance(t, dict) else getattr(t, 'created_at', datetime.now()).timestamp())
+
+    
+
+        # 将组装好的历史记录转换为 JSON 字符串并更新到缓存
+
+        return sorted_tasks
 
     def get_task(self, session_id: str, task_id: str) -> Optional[Task]:
         """获取任务
@@ -168,71 +177,8 @@ class SessionManager:
         self.memory_cache[session_id].task_list = task_list
         
         return task_list.get(task_id)
-
-    
-
-    def add_turn(self, session_id: str, role: str, content: str,
-                 content_type: ContentType = None,
-                 task_id: str = None,
-                 metadata: Dict = None,
-                 thought: str = None,
-                 observation: str = None,
-                 skill_calls: List[Dict] = None,
-                 steps: List[Dict] = None,
-                 thought_chain: Dict = None):
-        """添加对话轮次
-
-        Args:
-            session_id: 会话ID
-            role: 角色（user/assistant/tool/system）
-            content: 内容
-            content_type: 内容类型
-            task_id: 任务ID
-            metadata: 元数据
-            thought: 思考过程
-            observation: 观察结果
-            skill_calls: 技能调用列表
-            steps: 任务步骤列表
-            thought_chain: 思考链
-        """
-        history = self.get_history(session_id)
         
-        # 构建完整的对话轮次信息
-        turn_info = {
-            "role": role,
-            "content": content,
-            "time": time.time(),
-            "content_type": content_type.value if content_type else None,
-            "task_id": task_id,
-            "metadata": metadata,
-            "thought": thought,
-            "observation": observation,
-            "skill_calls": skill_calls,
-            "steps": steps,
-            "thought_chain": thought_chain
-        }
-        
-        history.append(turn_info)
-
-        if len(history) > self.max_history_turns:
-            history = history[-self.max_history_turns:]
-
-        # 确保会话在缓存中
-        if session_id not in self.memory_cache:
-            self.memory_cache[session_id] = Session(session_id=session_id)
-        
-        # 更新缓存中的历史记录
-        self.memory_cache[session_id].history_json = json.dumps(history)
-        self._save_to_db(session_id, history)
-
-        self.context_manager.add_message(
-            role=role,
-            content=content,
-            content_type=content_type,
-            task_id=task_id,
-            metadata=metadata
-        )
-    def add_step(self, session_id: str, task_id: str, step_index: int, result: str, thought: str = None, action: str = None, action_input: str = None):
+    def add_step(self, session_id: str, task_id: str, step_index: int, result: str, status: str = None, thought: str = None, action: str = None, action_input: str = None, description: str = None):
         """添加任务步骤
 
         Args:
@@ -279,7 +225,10 @@ class SessionManager:
             "step_type": action or "unknown",
             "thought": thought or "",
             "result": result,
+            "status": status or "completed",
             "skill_call": action or "",
+            "skill_input": action_input or "",
+            "description": description or "",
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
         }
@@ -377,14 +326,9 @@ class SessionManager:
             session_id: 会话ID
             history: 会话历史
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO sessions (session_id, history_json, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (session_id, json.dumps(history, ensure_ascii=False)))
-        conn.commit()
-        conn.close()
+        # 注意：由于我们现在从 task_list 组装历史记录，
+        # 这个方法主要用于向后兼容，实际保存应该通过 _save_task_list_to_db
+        pass
 
     def _save_task_list_to_db(self, session_id: str, task_list: Dict[str, Any]):
         """保存任务列表到数据库
@@ -396,9 +340,15 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO sessions (session_id, task_list, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (session_id, json.dumps(task_list, ensure_ascii=False, default=str)))
+            INSERT OR REPLACE INTO sessions (session_id, user_name, title, task_list, token_count, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (
+            session_id,
+            self.memory_cache[session_id].user_name if session_id in self.memory_cache else "default",
+            self.memory_cache[session_id].title if session_id in self.memory_cache else "新会话",
+            json.dumps(task_list, ensure_ascii=False, default=str),
+            self.memory_cache[session_id].token_count if session_id in self.memory_cache else 0
+        ))
         conn.commit()
         conn.close()
 
@@ -459,13 +409,13 @@ class SessionManager:
             session_id: 会话ID
         """
         if session_id in self.memory_cache:
-            # 只清除历史记录，不覆盖整个Session对象
-            self.memory_cache[session_id].history_json = "[]"
+            # 只清除任务列表，不覆盖整个Session对象
+            self.memory_cache[session_id].task_list = {}
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE sessions SET history_json = '[]', updated_at = CURRENT_TIMESTAMP
+            UPDATE sessions SET task_list = '{}', updated_at = CURRENT_TIMESTAMP
             WHERE session_id = ?
         """, (session_id,))
         conn.commit()
@@ -596,15 +546,12 @@ class SessionManager:
         Returns:
             响应
         """
+        
         classifier = TaskClassifier(self.config)
-        task_info = classifier.classify(user_input)
-
-        self.add_turn(session_id, "user", user_input,
-                     content_type=ContentType.USER_INPUT)
+        history = self.get_history(session_id)
+        task_info = classifier.classify(user_input, history)
 
         response = f"任务级别: {task_info['level']}\n置信度: {task_info['confidence']}\n理由: {task_info['reason']}"
-        self.add_turn(session_id, "assistant", response,
-                     content_type=ContentType.ASSISTANT_RESPONSE)
 
         return response
 
@@ -664,7 +611,7 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT session_id, history_json, created_at, updated_at
+            SELECT session_id, title, task_list, created_at, updated_at
             FROM sessions
             ORDER BY updated_at DESC
         """)
@@ -672,19 +619,30 @@ class SessionManager:
         conn.close()
 
         sessions = []
-        for session_id, history_json, created_at, updated_at in rows:
+        for session_id, title, task_list_json, created_at, updated_at in rows:
             try:
-                history = json.loads(history_json) if history_json else []
-                first_user_msg = ""
-                for msg in history:
-                    if msg.get("role") == "user":
-                        first_user_msg = msg.get("content", "")[:50]
-                        break
+                # 从 task_list 组装历史记录以获取消息数量
+                task_list = json.loads(task_list_json) if task_list_json else {}
+                message_count = 0
+                first_message = ""
+                
+                # 遍历任务计算消息数量并获取第一条用户消息
+                for task in task_list.values():
+                    if isinstance(task, dict):
+                        if task.get('user_input'):
+                            message_count += 1
+                            if not first_message:
+                                first_message = task.get('user_input', '')[:50]
+                        if task.get('result'):
+                            message_count += 1
+                        if task.get('steps'):
+                            message_count += len(task.get('steps', [])) * 2  # 每个步骤包含思考和结果
 
                 sessions.append({
                     "session_id": session_id,
-                    "message_count": len(history),
-                    "first_message": first_user_msg,
+                    "title": title,
+                    "message_count": message_count,
+                    "first_message": first_message,
                     "created_at": created_at,
                     "updated_at": updated_at,
                     "has_checkpoint": False
@@ -693,6 +651,8 @@ class SessionManager:
                 self.logger.error(f"解析会话{session_id}时出错：{e}")
 
         return sessions
+    
+    
 
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话详细信息
@@ -706,7 +666,7 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT session_id, history_json, checkpoint_json, created_at, updated_at
+            SELECT session_id, title, token_count, task_list, checkpoint_json, created_at, updated_at
             FROM sessions
             WHERE session_id = ?
         """, (session_id,))
@@ -716,20 +676,28 @@ class SessionManager:
         if not row:
             return None
 
-        session_id, history_json, checkpoint_json, created_at, updated_at = row
-        history = json.loads(history_json) if history_json else []
+        session_id, title, token_count, task_list_json, checkpoint_json, created_at, updated_at = row
+        
+        # 从 task_list 组装历史记录
+        task_list = json.loads(task_list_json) if task_list_json else {}
+        
+        # 遍历任务，按时间顺序排序
+        sorted_tasks = sorted(task_list.values(), key=lambda t: t.get('created_at', 0) if isinstance(t, dict) else getattr(t, 'created_at', datetime.now()).timestamp())
+
 
         return {
             "session_id": session_id,
-            "history": history,
-            "message_count": len(history),
+            "title": title,
+            "task_count": len(sorted_tasks),
+            "task_list": sorted_tasks,
+            "token_count": token_count,
             "created_at": created_at,
             "updated_at": updated_at,
             "has_checkpoint": checkpoint_json is not None
         }
 
     def rename_session(self, session_id: str, new_title: str) -> bool:
-        """重命名会话（通过在历史记录开头添加标题）
+        """重命名会话
 
         Args:
             session_id: 会话ID
@@ -738,22 +706,23 @@ class SessionManager:
         Returns:
             是否成功
         """
-        history = self.get_history(session_id)
-        if not history:
-            return False
-
-        if history and history[0].get("role") == "system" and history[0].get("type") == "title":
-            history[0]["content"] = new_title
-        else:
-            history.insert(0, {"role": "system", "type": "title", "content": new_title, "time": time.time()})
-
         # 确保会话在缓存中
         if session_id not in self.memory_cache:
             self.memory_cache[session_id] = Session(session_id=session_id)
-        
-        # 更新缓存中的历史记录
-        self.memory_cache[session_id].history_json = json.dumps(history)
-        self._save_to_db(session_id, history)
+
+        # 更新缓存中的标题
+        self.memory_cache[session_id].title = new_title
+
+        # 更新数据库中的标题
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE sessions SET title = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        """, (new_title, session_id))
+        conn.commit()
+        conn.close()
+
         return True
 
     def delete_session(self, session_id: str) -> bool:
@@ -795,11 +764,11 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO sessions (session_id, user_name, history_json)
-            VALUES (?, ?, ?)
-        """, (session_id, user_name, json.dumps([])))
+            INSERT INTO sessions (session_id, user_name, title, task_list, token_count)
+            VALUES (?, ?, ?, ?, ?)
+        """, (session_id, user_name, "新会话", json.dumps({}), 0))
         conn.commit()
         conn.close()
         
-        self.memory_cache[session_id] = []
+        self.memory_cache[session_id] = Session(session_id=session_id, user_name=user_name, title="新会话")
         return session_id

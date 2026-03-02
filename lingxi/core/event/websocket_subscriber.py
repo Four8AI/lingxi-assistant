@@ -2,24 +2,24 @@ import asyncio
 import logging
 from typing import Dict, Any
 from lingxi.core.event import global_event_publisher
+from lingxi.web import websocket
 
 
 class WebSocketSubscriber:
     """WebSocket事件订阅者"""
 
-    def __init__(self, websocket_manager):
+    def __init__(self, websocket_manager: websocket.WebSocketManager):
         """初始化WebSocket订阅者
 
         Args:
             websocket_manager: WebSocket管理器实例
         """
-        self.websocket_manager = websocket_manager
+        self.websocket_manager = websocket_manager 
         self.logger = logging.getLogger(__name__)
         self._subscribe_to_events()
 
     def _subscribe_to_events(self):
         """订阅事件"""
-        global_event_publisher.subscribe('thought_chain', self.handle_thought_chain)
         global_event_publisher.subscribe('think_start', self.handle_think_start)
         global_event_publisher.subscribe('think_final', self.handle_think_final)
         global_event_publisher.subscribe('think_stream', self.handle_think_stream)
@@ -34,7 +34,6 @@ class WebSocketSubscriber:
 
     def _unsubscribe_from_events(self):
         """取消订阅事件"""
-        global_event_publisher.unsubscribe('thought_chain', self.handle_thought_chain)
         global_event_publisher.unsubscribe('think_start', self.handle_think_start)
         global_event_publisher.unsubscribe('think_final', self.handle_think_final)
         global_event_publisher.unsubscribe('think_stream', self.handle_think_stream)
@@ -46,22 +45,6 @@ class WebSocketSubscriber:
         global_event_publisher.unsubscribe('task_end', self.handle_task_end)
 
         self.logger.info("WebSocket订阅者已停止监听事件")
-
-    def handle_thought_chain(self, session_id: str, execution_id: str, thoughts: list):
-        """处理思维链事件
-
-        Args:
-            session_id: 会话ID
-            execution_id: 执行ID
-            thoughts: 思维链列表
-        """
-        if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
-                session_id=session_id,
-                event_type='thought_chain',
-                execution_id=execution_id,
-                data={"thoughts": thoughts}
-            ))
 
     def handle_think_start(self, session_id: str, execution_id: str, **kwargs):
         """处理思考开始事件
@@ -88,6 +71,7 @@ class WebSocketSubscriber:
             content: 思考内容
             **kwargs: 其他参数
         """
+        self.logger.debug(f"Received think_stream event: session_id={session_id}, execution_id={execution_id}, content={content}, kwargs={kwargs}")
         if self.websocket_manager:
             asyncio.create_task(self.websocket_manager.send_event(
                 session_id=session_id,
@@ -95,6 +79,8 @@ class WebSocketSubscriber:
                 execution_id=execution_id,
                 data={"content": content, **kwargs}
             ))
+        else:
+            self.logger.warning("websocket_manager is None, cannot send think_stream event")
 
     def handle_think_final(self, session_id: str, execution_id: str, content: str, **kwargs):
         """处理思考结束事件
@@ -163,7 +149,7 @@ class WebSocketSubscriber:
                 data={"step_index": step_index, **kwargs}
             ))
 
-    def handle_step_end(self, session_id: str, execution_id: str, step_index: int, result: dict, **kwargs):
+    def handle_step_end(self, session_id: str, execution_id: str, step_index: int, result: str, **kwargs):
         """处理步骤执行结束事件
 
         Args:

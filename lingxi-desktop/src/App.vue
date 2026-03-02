@@ -81,6 +81,16 @@ async function initializeApp() {
           isThinking: item.isThinking || false
         }))
         appStore.setTurns(turns)
+      } else {
+        // 没有会话时，创建一个新会话
+        const sessionData = await window.electronAPI.api.createSession()
+        const session = {
+          id: sessionData.session_id,
+          name: sessionData.user_name || '新会话'
+        }
+        appStore.setSessions([session])
+        appStore.setCurrentSession(session.id)
+        appStore.setTurns([])
       }
 
       await window.electronAPI.ws.connect(appStore.currentSessionId || undefined)
@@ -134,20 +144,40 @@ function setupWebSocketListeners() {
 
     window.electronAPI.ws.onTaskStart((data) => {
       console.log('Task started:', data)
-      // 创建一个新的助手消息，用于关联后续的任务执行
-      const assistantMessage = {
-        id: `assistant-${data.executionId || Date.now()}`,
-        role: 'assistant',
-        content: '',
-        time: Date.now(),
-        executionId: data.executionId,
-        status: 'running',
-        isThinking: false,
-        thought: '',
-        steps: [],
-        plan: null
+      // 查找是否已存在临时助手消息
+      const updatedTurns = [...appStore.turns]
+      const tempIndex = updatedTurns.findIndex(turn => 
+        turn.role === 'assistant' && 
+        turn.executionId && 
+        turn.executionId.startsWith('temp_') &&
+        turn.isStreaming
+      )
+      
+      if (tempIndex !== -1) {
+        // 更新临时助手消息的执行ID和状态
+        updatedTurns[tempIndex] = {
+          ...updatedTurns[tempIndex],
+          executionId: data.executionId,
+          status: 'running',
+          isStreaming: true
+        }
+        appStore.setTurns(updatedTurns)
+      } else {
+        // 创建一个新的助手消息，用于关联后续的任务执行
+        const assistantMessage = {
+          id: `assistant-${data.executionId || Date.now()}`,
+          role: 'assistant',
+          content: '',
+          time: Date.now(),
+          executionId: data.executionId,
+          status: 'running',
+          isThinking: false,
+          thought: '',
+          steps: [],
+          plan: null
+        }
+        appStore.setTurns([...appStore.turns, assistantMessage])
       }
-      appStore.setTurns([...appStore.turns, assistantMessage])
     })
 
     window.electronAPI.ws.onTaskEnd((data) => {
@@ -171,6 +201,7 @@ function setupWebSocketListeners() {
             ...turn,
             content: data.result,
             status: 'completed',
+            isStreaming: false,
             isThinking: false
           }
           appStore.setTurns(updatedTurns)
@@ -316,7 +347,9 @@ function setupWebSocketListeners() {
         if (updatedTurns[targetIndex].steps[stepIndex]) {
           updatedTurns[targetIndex].steps[stepIndex] = {
             ...updatedTurns[targetIndex].steps[stepIndex],
-            status: 'completed',
+            description: data.description || updatedTurns[targetIndex].steps[stepIndex].description,
+            status: data.status || 'completed',
+            step_id: data.step_id || stepIndex,
             result: data.result
           }
         }

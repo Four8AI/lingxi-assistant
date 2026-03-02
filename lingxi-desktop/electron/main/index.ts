@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { WindowManager } from './windowManager'
 import { ApiClient } from './apiClient'
 import { WsClient } from './wsClient'
@@ -7,35 +7,32 @@ import { FileManager } from './fileManager'
 class App {
   private windowManager: WindowManager
   private apiClient: ApiClient
-  private wsClient: WsClient
+  private wsClient: WsClient | null = null // 改为可选类型，延迟初始化
   private fileManager: FileManager
 
   constructor() {
     this.windowManager = new WindowManager()
     this.apiClient = new ApiClient('http://127.0.0.1:5000')
-    this.wsClient = new WsClient('ws://127.0.0.1:5000/ws')
     this.fileManager = new FileManager()
 
     this.setupIpcHandlers()
+    // 移除直接初始化WS，改为延迟初始化
   }
 
   private setupIpcHandlers(): void {
+    // ===== 原有窗口/文件/API IPC 逻辑保持不变 =====
     ipcMain.handle('window:minimize', () => {
       this.windowManager.hideToEdge()
     })
-
     ipcMain.handle('window:toggle', () => {
       this.windowManager.toggleWindow()
     })
-
     ipcMain.handle('window:maximize', () => {
       this.windowManager.maximizeWindow()
     })
-
     ipcMain.handle('window:edge-check', () => {
       return this.windowManager.checkEdgePosition()
     })
-
     ipcMain.handle('window:is-maximized', () => {
       return this.windowManager.isMaximized()
     })
@@ -43,19 +40,15 @@ class App {
     ipcMain.handle('file:select', async (_, filters) => {
       return this.fileManager.selectFile(filters)
     })
-
     ipcMain.handle('file:select-directory', async () => {
       return this.fileManager.selectDirectory()
     })
-
     ipcMain.handle('file:select-files', async (_, filters) => {
       return this.fileManager.selectFiles(filters)
     })
-
     ipcMain.handle('file:save', async (_, defaultPath, filters) => {
       return this.fileManager.saveFile(defaultPath, filters)
     })
-
     ipcMain.handle('file:open-explorer', async (_, filePath) => {
       return this.fileManager.openInExplorer(filePath)
     })
@@ -63,103 +56,128 @@ class App {
     ipcMain.handle('api:get-sessions', async () => {
       return this.apiClient.getSessions()
     })
-
     ipcMain.handle('api:get-session-history', async (_, sessionId, maxTurns) => {
       return this.apiClient.getSessionHistory(sessionId, maxTurns)
     })
-
     ipcMain.handle('api:create-session', async (_, userName) => {
       return this.apiClient.createSession(userName)
     })
-
     ipcMain.handle('api:delete-session', async (_, sessionId) => {
       return this.apiClient.deleteSession(sessionId)
     })
-
     ipcMain.handle('api:update-session-name', async (_, sessionId, name) => {
       return this.apiClient.updateSessionName(sessionId, name)
     })
-
     ipcMain.handle('api:clear-session-history', async (_, sessionId) => {
       return this.apiClient.clearSessionHistory(sessionId)
     })
-
     ipcMain.handle('api:execute-task', async (_, task, sessionId, modelOverride) => {
       return this.apiClient.executeTask(task, sessionId, modelOverride)
     })
-
     ipcMain.handle('api:get-task-status', async (_, executionId) => {
       return this.apiClient.getTaskStatus(executionId)
     })
-
     ipcMain.handle('api:retry-task', async (_, executionId, stepIndex, userInput) => {
       return this.apiClient.retryTask(executionId, stepIndex, userInput)
     })
-
     ipcMain.handle('api:cancel-task', async (_, executionId) => {
       return this.apiClient.cancelTask(executionId)
     })
-
     ipcMain.handle('api:get-checkpoints', async () => {
       return this.apiClient.getCheckpoints()
     })
-
     ipcMain.handle('api:resume-checkpoint', async (_, sessionId) => {
       return this.apiClient.resumeCheckpoint(sessionId)
     })
-
     ipcMain.handle('api:delete-checkpoint', async (_, sessionId) => {
       return this.apiClient.deleteCheckpoint(sessionId)
     })
-
     ipcMain.handle('api:get-skills', async () => {
       return this.apiClient.getSkills()
     })
-
     ipcMain.handle('api:install-skill', async (_, skillData, skillFiles) => {
       return this.apiClient.installSkill(skillData, skillFiles)
     })
-
     ipcMain.handle('api:diagnose-skill', async (_, skillId) => {
       return this.apiClient.diagnoseSkill(skillId)
     })
-
     ipcMain.handle('api:reload-skill', async (_, skillId) => {
       return this.apiClient.reloadSkill(skillId)
     })
-
     ipcMain.handle('api:get-resource-usage', async () => {
       return this.apiClient.getResourceUsage()
     })
-
     ipcMain.handle('api:get-config', async () => {
       return this.apiClient.getConfig()
     })
-
     ipcMain.handle('api:update-config', async (_, config) => {
       return this.apiClient.updateConfig(config)
     })
 
+    ipcMain.handle('api:get-session-info', async (_, sessionId) => {
+      return this.apiClient.getSessionInfo(sessionId)
+    })
+
+    // ===== WS IPC 逻辑优化（新增错误提示+延迟初始化）=====
     ipcMain.handle('ws:connect', async (_, sessionId) => {
-      this.wsClient.connect(sessionId)
+      // 延迟初始化WS客户端（首次连接时初始化）
+      if (!this.wsClient) {
+        this.initWsClient()
+      }
+      this.wsClient?.connect(sessionId)
     })
 
     ipcMain.handle('ws:disconnect', async () => {
-      this.wsClient.disconnect()
+      this.wsClient?.disconnect()
     })
 
     ipcMain.handle('ws:is-connected', async () => {
-      return this.wsClient.isConnected()
+      return this.wsClient?.isConnected() || false
     })
 
     ipcMain.handle('ws:send-message', async (_, message, sessionId) => {
-      this.wsClient.send({
+      this.wsClient?.send({
         type: 'stream_chat',
         content: message,
         sessionId: sessionId || 'default'
       })
     })
+  }
 
+  /**
+   * 初始化WS客户端（延迟执行，带错误提示）
+   */
+  private initWsClient(): void {
+    this.wsClient = new WsClient('ws://127.0.0.1:5000/ws')
+
+    // 监听WS错误，弹出可视化提示框
+    this.wsClient.on('error', (err: Error) => {
+      const mainWindow = this.windowManager.getWindow()
+      // 连接被拒绝的友好提示
+      if (err.message.includes('ECONNREFUSED')) {
+        dialog.showErrorBox(
+          'WebSocket连接失败',
+          '无法连接到本地5000端口的WS服务端，请确认：\n1. 后端服务已启动\n2. 5000端口未被其他程序占用\n3. 服务端WS地址配置正确（当前：ws://127.0.0.1:5000/ws）'
+        )
+      } else {
+        // 其他错误的通用提示
+        dialog.showErrorBox('WebSocket错误', `连接异常：${err.message}`)
+      }
+      // 转发错误到渲染进程，前端可自定义展示
+      mainWindow?.webContents.send('ws:error', err.message)
+    })
+
+    // 监听重连失败事件，提示用户
+    this.wsClient.on('reconnect_failed', () => {
+      dialog.showErrorBox(
+        'WS重连失败',
+        '已尝试10次重连仍无法连接到服务端，请检查服务端状态后手动重新连接'
+      )
+      const mainWindow = this.windowManager.getWindow()
+      mainWindow?.webContents.send('ws:reconnect-failed')
+    })
+
+    // ===== 原有WS事件转发逻辑保持不变 =====
     this.wsClient.on('connected', () => {
       const mainWindow = this.windowManager.getWindow()
       if (mainWindow) {
@@ -255,10 +273,16 @@ class App {
   start(): void {
     app.whenReady().then(() => {
       this.windowManager.createMainWindow()
+      // 可选：如果需要启动时自动连接WS，可延迟1秒初始化
+      // setTimeout(() => {
+      //   this.initWsClient()
+      //   this.wsClient?.connect()
+      // }, 1000)
     })
 
     app.on('window-all-closed', () => {
       if (process.platform !== 'darwin') {
+        this.wsClient?.disconnect() // 退出前断开WS
         app.quit()
       }
     })

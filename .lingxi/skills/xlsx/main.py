@@ -140,21 +140,69 @@ def _merge_excel(parameters: Dict[str, Any]) -> str:
 
 
 def _create_excel(parameters: Dict[str, Any]) -> str:
-    """Create new Excel file"""
-    output_file = parameters.get("output_file", "output.xlsx")
-    content = parameters.get("content", "")
-
+    """Create new Excel file
+    
+    支持两种参数格式:
+    1. content: CSV格式字符串
+    2. data: Python列表/字典 (DataFrame可直接接收的数据)
+    
+    输出文件路径:
+    - file_path 或 output_file (优先使用 file_path)
+    """
+    # 确定输出文件路径
+    output_file = parameters.get("file_path") or parameters.get("output_file", "output.xlsx")
+    
+    # 获取数据
+    content = parameters.get("content")
+    data = parameters.get("data")
+    
+    # 参数校验
+    if not content and not data:
+        return (
+            "错误: 创建Excel文件缺少数据参数。\n"
+            "请提供以下任一参数:\n"
+            "  - content: CSV格式字符串 (例如: '姓名,年龄\\n张三,25\\n李四,30')\n"
+            "  - data: Python列表/字典 (例如: [{'姓名': '张三', '年龄': 25}, ...])"
+        )
+    
+    # 如果同时传了 content 和 data，优先使用 data
+    if data is not None and content:
+        logging.getLogger(__name__).warning("同时提供了 content 和 data 参数，优先使用 data")
+    
     try:
         import pandas as pd
         from io import StringIO
         
-        # 解析内容
-        df = pd.read_csv(StringIO(content))
+        # 根据数据类型创建 DataFrame
+        if data is not None:
+            # 使用 data 参数 (列表/字典)
+            if not isinstance(data, (list, dict)):
+                return (
+                    f"错误: data 参数类型不正确。期望 list 或 dict，实际得到 {type(data).__name__}\n"
+                    f"示例: [{'姓名': '张三', '年龄': 25}, {'姓名': '李四', '年龄': 30}]"
+                )
+            df = pd.DataFrame(data)
+        else:
+            # 使用 content 参数 (CSV字符串)
+            if not isinstance(content, str):
+                return (
+                    f"错误: content 参数类型不正确。期望 str (CSV格式)，实际得到 {type(content).__name__}\n"
+                    f"示例: '姓名,年龄\\n张三,25\\n李四,30'"
+                )
+            if not content.strip():
+                return "错误: content 参数为空字符串，无法创建Excel文件"
+            df = pd.read_csv(StringIO(content))
+        
+        # 检查 DataFrame 是否为空
+        if df.empty:
+            return "错误: 数据为空，无法创建Excel文件"
+        
         df.to_excel(output_file, index=False)
         
         result = f"成功创建Excel文件: {output_file}\n"
         result += f"行数: {len(df)}\n"
-        result += f"列数: {len(df.columns)}"
+        result += f"列数: {len(df.columns)}\n"
+        result += f"列名: {list(df.columns)}"
         
         return result
     except Exception as e:

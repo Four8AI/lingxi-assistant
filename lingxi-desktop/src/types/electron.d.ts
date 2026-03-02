@@ -34,6 +34,7 @@ declare global {
         getResourceUsage: () => Promise<any>
         getConfig: () => Promise<any>
         updateConfig: (config: any) => Promise<void>
+        getSessionInfo: (sessionId: string) => Promise<any>
       }
       ws: {
         connect: (sessionId?: string) => Promise<void>

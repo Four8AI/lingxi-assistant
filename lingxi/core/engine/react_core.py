@@ -83,11 +83,13 @@ finish(answer) - 完成任务并返回答案
             skills_list=skills_list
         )
 
-    def _build_initial_messages(self, user_input: str, task_info: Dict[str, Any], history_context: str) -> List[Dict[str, Any]]:
+    def _build_initial_messages(self, user_input: str, task_plan: str, task_info: Dict[str, Any], history_context: str) -> List[
+        Dict[str, Any]]:
         """构建初始消息
 
         Args:
             user_input: 用户输入
+            task_plan: 任务计划
             task_info: 任务信息
             history_context: 历史上下文
 
@@ -97,10 +99,13 @@ finish(answer) - 完成任务并返回答案
         # 获取可用技能列表
         available_skills = self.skill_caller.list_available_skills(enabled_only=True) if self.skill_caller else []
         skills_list = PromptTemplates.format_skills_list(available_skills)
-        
+
         # 获取系统信息
         system_info = PromptTemplates.get_system_info()
         
+        # 格式化任务计划
+        task_plan_str = PromptTemplates.format_task_plan(task_plan)
+
         # 使用build_react_messages_with_cache构建消息列表
         return PromptTemplates.build_react_messages_with_cache(
             user_input=user_input,
@@ -108,12 +113,13 @@ finish(answer) - 完成任务并返回答案
             history_context=history_context,
             skills_list=skills_list,
             steps=[],
-            system_info=system_info
+            system_info=system_info,
+            task_plan=task_plan_str
         )
 
     def _execute_step(self, step: int, messages: List[Dict[str, Any]], task_level: str,
-                     session_id: str, execution_id: str, steps: List[Dict[str, Any]],
-                     stream: bool = True) -> Generator[Dict[str, Any], None, None]:
+                      session_id: str, execution_id: str, steps: List[Dict[str, Any]],
+                      stream: bool = True):
         """执行单个步骤
 
         Args:
@@ -124,76 +130,49 @@ finish(answer) - 完成任务并返回答案
             execution_id: 执行ID
             steps: 已执行步骤
             stream: 是否流式输出
-
-        Returns:
-            流式响应生成器
         """
         self._build_step_messages(messages, steps)
         self.logger.debug(f"生成思考和行动（stream={stream}")
-
-        # 发布思考开始事件
-        yield {
-            "type": "think_start"
-        }
 
         full_response = ""
         for response_chunk in self._process_llm_response(messages, task_level, stream):
             if response_chunk["type"] == "thought_chunk":
                 content = response_chunk["content"]
                 self._publish_think_stream(session_id, execution_id, step, content)
-                yield {
-                    "type": "stream",
-                    "step": step,
-                    "content": content,
-                    "is_partial": True
-                }
             elif response_chunk["type"] == "complete":
                 full_response = response_chunk["response"]
                 break
 
-        # 发布思考结束事件
-        yield {
-            "type": "think_final"
-        }
-                
         parsed = self._parse_response(full_response)
 
         if not parsed:
             self.logger.warning("无法解析响应，结束循环")
-            global_event_publisher.publish(
-                'task_failed',
-                session_id=session_id,
-                execution_id=execution_id,
-                error="无法解析LLM响应"
-            )
-            yield {
-                "type": "error",
-                "message": "无法解析LLM响应"
-            }
-            return
+            self._publish_step_end(session_id, execution_id, step, "failed", None, "无法解析LLM响应",
+                                   parsed.get("thought", ""), parsed.get("description", ""))
+            self._publish_task_failed(session_id, execution_id, "无法解析LLM响应")
+            return parsed
 
         if parsed.get("action") == "finish":
             final_answer = parsed.get("action_input", "")
-            self._publish_step_end(session_id, execution_id, step, "completed", None, final_answer,parsed.get("thought"))
-            task_end_event = self._publish_task_end(session_id, execution_id, final_answer)
-            yield task_end_event
-           
-            for chunk in self._handle_finish_action(parsed, steps):
-                yield chunk
-            
-            return
+            self._publish_step_end(session_id, execution_id, step, "completed", None, final_answer,
+                                   parsed.get("thought"), parsed.get("description"))
+            self._publish_task_end(session_id, execution_id, final_answer)
 
-        for chunk in self._handle_step_complete(parsed, step):
-            observation = chunk.get("observation", "")
-            self._publish_step_end(session_id, execution_id, step, "completed", None, observation,parsed.get("thought"))
-            yield chunk
+            self._handle_finish_action(parsed, steps)
+            return parsed
 
-    def _execute_task_stream(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
-                           session_id: str, execution_id: str, stream: bool) -> Generator[Dict[str, Any], None, None]:
+        chunk = self._handle_step_complete(parsed, step)
+        observation = chunk.get("observation", "")
+        self._publish_step_end(session_id, execution_id, step, "completed", None, observation, parsed.get("thought"),
+                               parsed.get("description"))
+        return parsed
+
+    def _execute_task_stream(self, user_input: str,task_plan: List[str], task_info: Dict[str, Any], history: List[Dict[str, str]],
+                             session_id: str, execution_id: str, stream: bool) -> dict:
         """执行任务（流式）
 
         Args:
-            task: 任务文本
+            user_input: 用户输入
             task_info: 任务信息
             history: 会话历史
             session_id: 会话ID
@@ -204,73 +183,25 @@ finish(answer) - 完成任务并返回答案
             流式响应生成器
         """
         self.logger.debug(f"ReAct处理任务: {task_info.get('task_type')} (stream={stream})")
-        self.logger.debug(f"用户输入: {task}")
-
-        # 发布任务开始事件
-        yield {
-            "type": "task_start"
-        }
+        self.logger.debug(f"用户输入: {user_input}")
 
         task_level = task_info.get("level", "simple")
 
         history_context = self._build_history_context(history)
-        messages = self._build_initial_messages(task, task_info, history_context)
+
+        messages = self._build_initial_messages(user_input, task_plan, task_info, history_context)
         steps = []
 
         for step in range(self.max_steps):
             self.logger.debug(f"步骤 {step + 1}/{self.max_steps}")
-
             self._publish_step_start(session_id, execution_id, step, self.max_steps)
-            # 发布步骤开始事件
-            yield {
-                "type": "step_start",
-                "step": step,
-                "total_steps": self.max_steps
-            }
-
-            for chunk in self._execute_step(step, messages, task_level, session_id, execution_id, steps, stream=stream):
-                yield chunk
-
-                if chunk.get("type") == "stream":
-                    continue
-                if chunk.get("type") == "finish":
-                    return
-                if chunk.get("type") == "error":
-                    return
-                if chunk.get("type") == "step_complete":
-                    steps.append({
-                        "thought": chunk.get("thought"),
-                        "action": chunk.get("action"),
-                        "action_input": chunk.get("action_input"),
-                        "observation": chunk.get("observation")
-                    })
+            res = self._execute_step(step, messages, task_level, session_id, execution_id, steps, stream=stream)
+            steps.append(res)
 
         final_response = self._generate_final_response(task, steps, task_level)
-        task_end_event = self._publish_task_end(session_id, execution_id, final_response)
-        yield task_end_event
-        yield {
-            "type": "finish",
-            "result": final_response,
-            "steps": steps,
-            "max_steps_reached": True
-        }
+        self._publish_task_end(session_id, execution_id, final_response)
 
-    def _execute_task_sync(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]],
-                          session_id: str, execution_id: str) -> Generator[Dict[str, Any], None, None]:
-        """执行任务（同步）
-
-        Args:
-            task: 任务文本
-            task_info: 任务信息
-            history: 会话历史
-            session_id: 会话ID
-            execution_id: 执行ID
-
-        Returns:
-            流式响应生成器
-        """
-        for chunk in self._execute_task_stream(task, task_info, history, session_id, execution_id, stream=False):
-            yield chunk
+        return {"session_id": session_id, "execution_id": execution_id, "final_response": final_response}
 
     def process(self, user_input: str, task_info: Dict[str, Any], session_history: List[Dict[str, str]] = None,
                 session_id: str = "default", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
@@ -287,18 +218,3 @@ finish(answer) - 完成任务并返回答案
             系统响应（非流式）或流式响应生成器（流式）
         """
         return self._execute_new_task(user_input, task_info, session_history, session_id, stream)
-
-    def stream_process(self, user_input: str, task_info: Dict[str, Any], session_history: List[Dict[str, str]] = None,
-                      session_id: str = "default") -> Generator[Dict[str, Any], None, None]:
-        """流式处理用户输入
-
-        Args:
-            user_input: 用户输入
-            task_info: 任务信息
-            session_history: 会话历史
-            session_id: 会话ID
-
-        Returns:
-            流式响应生成器
-        """
-        return self._process_task(user_input, task_info, session_history, session_id, stream=True)

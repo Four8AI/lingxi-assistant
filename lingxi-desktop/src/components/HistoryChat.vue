@@ -91,72 +91,69 @@ async function handleSelectSession(sessionId: string) {
   appStore.setCurrentSession(sessionId)
   
   try {
-    console.log('Calling getSessionHistory for sessionId:', sessionId)
-    const history = await window.electronAPI.api.getSessionHistory(sessionId)
-    console.log('Received history:', history)
+    console.log('Calling getSessionInfo for sessionId:', sessionId)
+    const sessionInfo = await window.electronAPI.api.getSessionInfo(sessionId)
+    console.log('Received sessionInfo:', sessionInfo)
     
-    // 转换后端返回的历史记录格式为前端期望的格式
-    const turns = history.history.map((item: any, index: number) => {
-      // 如果content中包含步骤和思考信息，解析它们
-      let steps = item.steps || []
-      let thought = item.thought || ''
-      
-      if (item.content && typeof item.content === 'string') {
-        // 尝试从content中解析步骤和思考信息
-        const content = item.content
-        
-        // 检查是否包含"## 步骤"标记
-        if (content.includes('## 步骤')) {
-          const stepRegex = /## 步骤 \d+：思考\s*\*\*思考\*\*：([\s\S]*?)\s*\*\*执行\*\*：([\s\S]*?)(?=## 步骤|# 最终结果|$)/g
-          const matches = [...content.matchAll(stepRegex)]
-          
-          if (matches.length > 0) {
-            steps = matches.map((match, i) => ({
-              stepIndex: i,
-              description: `步骤 ${i + 1}`,
-              status: 'completed',
-              thought: match[1].trim(),
-              result: match[2].trim()
-            }))
-          }
+    // 从 sessionInfo.task_list 中构建 turns
+    const turns = []
+    if (sessionInfo.task_list && Array.isArray(sessionInfo.task_list)) {
+      sessionInfo.task_list.forEach((task: any, taskIndex: number) => {
+        // 添加用户输入
+        if (task.user_input) {
+          turns.push({
+            id: `${sessionId}_${taskIndex}_user`,
+            role: 'user',
+            content: task.user_input,
+            time: task.created_at || Date.now(),
+            timestamp: task.created_at || Date.now(),
+            steps: [],
+            plan: null,
+            status: null,
+            isStreaming: false
+          })
         }
         
-        // 检查是否包含思考链信息
-        if (content.includes('# 思考链')) {
-          const thoughtChainMatch = content.match(/# 思考链\s*\n\n([\s\S]*?)(?=# 最终结果|$)/)
-          if (thoughtChainMatch) {
-            thought = thoughtChainMatch[1].trim()
-          }
+        // 添加助手响应
+        if (task.result) {
+          turns.push({
+            id: `${sessionId}_${taskIndex}_assistant`,
+            role: 'assistant',
+            content: task.result,
+            time: task.created_at ? new Date(task.created_at).getTime() + 1000 : Date.now(),
+            timestamp: task.created_at ? new Date(task.created_at).getTime() + 1000 : Date.now(),
+            steps: task.steps || [],
+            plan: task.plan || null,
+            status: task.status || null,
+            isStreaming: false
+          })
         }
-      }
-      
-      return {
-        id: `${sessionId}_${index}`,
-        role: item.role,
-        content: item.content,
-        time: item.time || Date.now(),
-        timestamp: item.time || Date.now(),
-        metadata: item.metadata,
-        thought: thought,
-        observation: item.observation,
-        skill_calls: item.skill_calls,
-        steps: steps,
-        thought_chain: item.thought_chain || null,
-        plan: item.plan || null,
-        executionId: item.executionId || null,
-        status: item.status || null,
-        isThinking: item.isThinking || false,
-        isStreaming: item.isStreaming || false
-      }
-    })
-    
-    console.log('Converted turns:', turns)
+      })
+    }
     appStore.setTurns(turns)
-    console.log('Set turns in appStore:', appStore.turns)
-  } catch (error) {
-    console.error('Failed to load session history:', error)
-    // 即使获取历史失败，也更新为会话的历史记录为空
-    appStore.setTurns([])
+  } catch (error: any) {
+    console.error('Failed to load session info:', error)
+    // 检查是否是 404 错误（会话不存在）
+    if (error?.response?.status === 404 || error?.message?.includes('不存在')) {
+      console.log('Session does not exist, creating new session')
+      // 会话不存在，创建新会话
+      try {
+        const sessionData = await window.electronAPI.api.createSession()
+        const session = {
+          id: sessionData.session_id,
+          name: sessionData.user_name || '新会话'
+        }
+        appStore.setSessions([...sessions.value, session])
+        appStore.setCurrentSession(session.id)
+        appStore.setTurns([])
+      } catch (createError) {
+        console.error('Failed to create session:', createError)
+        appStore.setTurns([])
+      }
+    } else {
+      // 其他错误，将 turns 设置为空数组
+      appStore.setTurns([])
+    }
   }
 }
 

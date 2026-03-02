@@ -26,6 +26,7 @@ class SessionStoreSubscriber:
         global_event_publisher.subscribe('plan_start', self.handle_plan_start)
         global_event_publisher.subscribe('plan_final', self.handle_plan_final)
         global_event_publisher.subscribe('step_end', self.handle_step_end)
+        global_event_publisher.subscribe('task_failed', self.handle_task_failed)
         global_event_publisher.subscribe('task_end', self.handle_task_end)
 
         self.logger.info("会话存储订阅者已初始化，开始监听事件")
@@ -36,8 +37,10 @@ class SessionStoreSubscriber:
         global_event_publisher.unsubscribe('plan_final', self.handle_plan_final)
         global_event_publisher.unsubscribe('step_end', self.handle_step_end)
         global_event_publisher.unsubscribe('task_end', self.handle_task_end)
+        global_event_publisher.unsubscribe('task_failed', self.handle_task_failed)
 
         self.logger.info("会话存储订阅者已停止监听事件")
+
 
 
     def handle_plan_start(self, session_id: str, execution_id: str, **kwargs):
@@ -48,7 +51,20 @@ class SessionStoreSubscriber:
             execution_id: 执行ID
             **kwargs: 其他参数
         """
-        
+    def handle_task_failed(self, session_id: str, execution_id: str, **kwargs):
+        task_id = kwargs.get('task_id')
+        self.logger.debug(f"当前任务ID：{task_id}")
+        if not task_id:
+            self.logger.warning(f"处理 task_end 事件时缺少 task_id: {session_id}")
+            return
+            
+        if self.sessionManage:
+            self.sessionManage.set_task_result(
+                session_id=session_id,
+                task_id=task_id,
+                result=kwargs.get('error', ''),
+                user_input=kwargs.get('task_input', '')
+            )
 
     def handle_plan_final(self, session_id: str, execution_id: str, plan: list, **kwargs):
         """处理任务规划完成事件
@@ -95,9 +111,11 @@ class SessionStoreSubscriber:
                 task_id=task_id,
                 step_index=step_index,
                 result=result,
+                status=kwargs.get('status', ''),
                 thought=kwargs.get('thought', ''),
                 action=kwargs.get('action', ''),
-                action_input=kwargs.get('action_input', '')
+                action_input=kwargs.get('action_input', ''),
+                description=kwargs.get('description', '')
             )
 
     def handle_task_end(self, session_id: str, execution_id: str, result: str, **kwargs):
@@ -120,7 +138,7 @@ class SessionStoreSubscriber:
                 session_id=session_id,
                 task_id=task_id,
                 result=result,
-                user_input=kwargs.get('user_input', '')
+                user_input=kwargs.get('task_input', '')
             )
 
     def __del__(self):

@@ -1,9 +1,15 @@
-from typing import Dict, List, Optional, Any, Union, Generator
-from .plan_react_core import PlanReActCore
+import time
+from typing import Dict, List, Any, Union, Generator
+
+from lingxi.core.engine.plan_react_core import PlanReActCore
 
 
 class PlanReActEngine(PlanReActCore):
-    """支持断点重试的Plan+ReAct执行引擎"""
+    """支持断点重试的Plan+ReAct执行引擎
+    
+    继承自 PlanReActCore，复用其智能路由和执行逻辑，
+    额外支持从检查点恢复执行的功能。
+    """
 
     def process(self, user_input: str, task_info: Dict[str, Any], session_history: List[Dict[str, str]] = None, 
                 session_id: str = "default", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
@@ -20,15 +26,6 @@ class PlanReActEngine(PlanReActCore):
             系统响应（非流式）或流式响应生成器（流式）
         """
         self.logger.debug(f"Plan+ReAct处理任务: {task_info.get('level')} (stream={stream})")
-
-        # 保存用户输入到会话历史
-        if self.session_manager:
-            self.session_manager.add_turn(
-                session_id=session_id,
-                role="user",
-                content=user_input,
-                metadata={"task_level": task_info.get('level'), "task_reason": task_info.get('reason')}
-            )
 
         if self.session_manager:
             existing_checkpoint = self.session_manager.restore_checkpoint(session_id)
