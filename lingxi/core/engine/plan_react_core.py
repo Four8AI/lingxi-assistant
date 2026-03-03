@@ -180,9 +180,9 @@ class PlanReActCore(ReActCore):
             self.session_manager.save_checkpoint(session_id, checkpoint)
 
     def _execute_plan_steps(self, plan: List[str], task: str, task_info: Dict[str, Any],
-                           history: List[Dict[str, str]], session_id: str, 
+                           history: List[Dict[str, str]], session_id: str,
                            execution_id: str, stream: bool):
-        """执行计划中的步骤（每个步骤作为简单任务调用父类方法）
+        """执行计划中的步骤（将完整计划封装到ReAct提示词中，单次调用执行）
 
         Args:
             plan: 计划步骤列表
@@ -196,102 +196,63 @@ class PlanReActCore(ReActCore):
         checkpoint = self._create_initial_checkpoint(task, plan)
         self._save_plan_checkpoint(session_id, checkpoint)
 
-        all_results = []
-        step_results = []
+        try:
+            # 获取会话历史
+            session_history = self.session_manager.get_history(session_id) if self.session_manager else history
 
-        history = self.session_manager.get_history(session_id)
-        
-        for step_idx, step_description in enumerate(plan):
-            self.logger.debug(f"执行步骤 {step_idx + 1}/{len(plan)}: {step_description}")
-
-            self._publish_step_start(session_id, execution_id, step_idx, len(plan))
-
-            sub_task_info = {
-                "level": "simple",
-                "description": step_description,
-                "parent_task": task,
-                "step_index": step_idx
+            # 构建包含完整计划的任务信息
+            enhanced_task_info = {
+                "level": "complex",
+                "description": task,
+                "plan": plan,
+                "plan_formatted": self._format_plan_for_prompt(plan),
+                "reason": task_info.get("reason", "复杂任务，需要多步骤执行")
             }
 
-            current_step_results = []
-            step_success = True
-            step_error = None
+            # 单次调用父类方法执行完整计划
+            # 父类ReActCore会根据提示词中的计划自行按步骤执行
+            # 注意：父类 _execute_task_stream 返回的是字典，不是生成器
+            result = super()._execute_task_stream(
+                task, plan, enhanced_task_info, session_history, session_id, execution_id, stream
+            )
 
-            try:
-                # 构建包含之前步骤执行结果的历史信息
-                step_history = history.copy()
-                
-                # 构建完整的任务上下文信息
-                task_context = f"""原始任务: {task}
-
-完整计划:
-"""
-                for i, step in enumerate(plan):
-                    status = "✓" if i < step_idx else "▶" if i == step_idx else " "
-                    task_context += f"{status} 步骤 {i + 1}: {step}\n"
-                
-                # 添加已执行步骤结果
-                if step_results:
-                    task_context += "\n已执行步骤:\n"
-                    executed_steps = PromptTemplates.format_executed_steps(step_results, include_thought=False, max_prev_length=5000)
-                    task_context += executed_steps
-                    task_context += "\n现在请执行当前步骤:\n"
-                else:
-                    task_context += "\n请开始执行第一个步骤:\n"
-                
-                # 添加任务上下文到历史
-                step_history.append({
-                    "role": "user",
-                    "content": task_context
-                })
-                
-                for chunk in super()._execute_task_stream(
-                    task, plan, sub_task_info, step_history, session_id, execution_id, stream
-                ):
-                    if chunk.get("type") == "finish":
-                        current_step_results.append({
-                            "thought": chunk.get("thought", ""),
-                            "action": "finish",
-                            "action_input": chunk.get("result", ""),
-                            "observation": chunk.get("result", ""),
-                            "success": True
-                        })
-                        all_results.append(chunk.get("result", ""))
-                    elif chunk.get("type") == "error":
-                        step_success = False
-                        step_error = chunk.get("message", "")
-                    elif chunk.get("type") == "step_complete":
-                        current_step_results.append(chunk)
-
-            except Exception as e:
-                import traceback
-                step_success = False
-                step_error = str(e)
-                self.logger.error(f"步骤 {step_idx + 1} 执行失败: {e}\n{traceback.format_exc()}")
-
-            step_results.extend(current_step_results)
-            checkpoint["current_step_idx"] = step_idx + 1
-            checkpoint["step_results"] = step_results
+            # 更新检查点
+            checkpoint["current_step_idx"] = len(plan)
+            checkpoint["execution_status"] = "completed"
             checkpoint["timestamp"] = time.time()
             self._save_plan_checkpoint(session_id, checkpoint)
 
-            last_result = current_step_results[-1] if current_step_results else {}
-            observation = last_result.get("observation", last_result.get("result", ""))
-            self._publish_step_end(
-                session_id, execution_id, step_idx,
-                "completed" if step_success else "failed",
-                step_error, observation,
-                last_result.get("thought", ""),
-                step_description
-            )
+            final_result = result.get("final_response", "任务执行完成")
 
-            if not step_success:
-                final_result = self._generate_final_response(task, step_results, "complex")
-                self._publish_task_end(session_id, execution_id, final_result)
-                return    
+            # 如果是流式模式，需要yield结果
+            if stream:
+                yield {"type": "finish", "result": final_result}
 
-        final_result = self._summarize_results(task, all_results)
-        self._publish_task_end(session_id, execution_id, final_result)
+        except Exception as e:
+            import traceback
+            self.logger.error(f"计划执行失败: {e}\n{traceback.format_exc()}")
+            checkpoint["execution_status"] = "failed"
+            checkpoint["error_info"] = str(e)
+            checkpoint["timestamp"] = time.time()
+            self._save_plan_checkpoint(session_id, checkpoint)
+
+            if stream:
+                yield {"type": "error", "message": str(e)}
+
+    def _format_plan_for_prompt(self, plan: List[str]) -> str:
+        """将计划格式化为提示词中的计划描述
+
+        Args:
+            plan: 计划步骤列表
+
+        Returns:
+            格式化后的计划文本
+        """
+        lines = ["任务执行计划："]
+        for i, step in enumerate(plan, 1):
+            lines.append(f"  步骤 {i}: {step}")
+        lines.append("\n请按照上述计划逐步执行任务，每完成一个步骤后进行下一步。")
+        return "\n".join(lines)
 
     def _summarize_results(self, task: str, results: List[str]) -> str:
         """汇总所有步骤的结果
@@ -356,26 +317,26 @@ class PlanReActCore(ReActCore):
 
         if analyzed_level == "simple" and next_action:
             self.logger.debug("简单任务，直接执行next_action")
-            
+
             self._execute_direct_action(next_action, session_id, execution_id, task, stream)
         elif plan:
             self.logger.debug("复杂任务，执行计划")
-            
+
             self._publish_plan_start(session_id, execution_id)
 
             plan_descriptions = [step.get("description", str(step)) for step in plan]
 
             self._publish_plan_events(session_id, execution_id, plan_descriptions)
 
-
-            self._execute_plan_steps(plan_descriptions, task, task_info, history, session_id, execution_id, stream)
+            # 调用 _execute_plan_steps 并透传所有 chunk
+            for chunk in self._execute_plan_steps(
+                plan_descriptions, task, task_info, history, session_id, execution_id, stream
+            ):
+                yield chunk
         else:
             self.logger.warning("无法处理任务，降级为父类执行")
             for chunk in super()._execute_task_stream(task, task_info, history, session_id, execution_id, stream):
                 yield chunk
-
-        # 确保生成器有返回值，避免 NoneType 错误
-        yield {"type": "stream", "content": ""}
 
     def _execute_direct_action(self, action_data: Dict[str, Any], session_id: str, 
                                execution_id: str, task: str, stream: bool):
@@ -426,13 +387,33 @@ class PlanReActCore(ReActCore):
 
         plan = checkpoint["plan"]
         current_step_idx = int(checkpoint["current_step_idx"])
-        #step_results = checkpoint.get("step_results", [])
 
         execution_id = f"plan_{int(time.time())}"
         task = checkpoint["task"]
         task_info = {"level": "complex", "reason": "从检查点恢复"}
 
-        self._execute_plan_steps(
-            plan[current_step_idx:], task, task_info, history,
-            session_id, execution_id, stream
-        )
+        # 获取剩余计划步骤
+        remaining_plan = plan[current_step_idx:]
+
+        if stream:
+            # 流式模式：返回生成器
+            return self._execute_plan_steps(
+                remaining_plan, task, task_info, history or [],
+                session_id, execution_id, stream
+            )
+        else:
+            # 非流式模式：直接执行并返回结果
+            result_gen = self._execute_plan_steps(
+                remaining_plan, task, task_info, history or [],
+                session_id, execution_id, stream
+            )
+            # 消费生成器获取结果
+            try:
+                while True:
+                    try:
+                        next(result_gen)
+                    except StopIteration as e:
+                        return e.value if e.value else "任务恢复执行完成"
+            except Exception as e:
+                self.logger.error(f"恢复执行失败: {e}")
+                return f"恢复执行失败: {str(e)}"

@@ -581,6 +581,7 @@ class WebSocketManager:
 
             if hasattr(response_generator, '__iter__'):
                 for _ in response_generator:
+                    # 让出事件循环，让异步任务有机会执行
                     await asyncio.sleep(0.001)
         except Exception as e:
             logger.error(f"流式响应处理失败: {e}", exc_info=True)

@@ -224,35 +224,40 @@ function setupWebSocketListeners() {
     })
 
     window.electronAPI.ws.onThinkStream((data) => {
-      console.log('Think stream:', data)
+      console.log('[Renderer] Think stream received:', data)
       // 找到对应的助手消息，将思考内容添加到具体的step对象上
       const updatedTurns = [...appStore.turns]
-      const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
+      const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.execution_id)
       if (targetIndex !== -1) {
         const turn = updatedTurns[targetIndex]
         if (!turn.steps) {
           turn.steps = []
         }
-        
+
         // 获取当前步骤索引，默认为最后一个步骤
-        const stepIndex = data.step_index || turn.steps.length - 1
-        
+        const stepIndex = data.step_index || 0
+
         // 确保步骤对象存在
         if (!turn.steps[stepIndex]) {
           turn.steps[stepIndex] = {
-            stepIndex: stepIndex,
+            step_id: stepIndex,
             description: `步骤 ${stepIndex + 1}`,
-            status: 'running'
+            status: 'running',
+            thought: ''
           }
         }
-        
+
         // 添加思考内容到步骤对象
+        const content = data.body?.reasoning_content || data.content || ''
         if (!turn.steps[stepIndex].thought) {
           turn.steps[stepIndex].thought = ''
         }
-        turn.steps[stepIndex].thought += data.body?.reasoning_content || data.content || ''
-        
+        turn.steps[stepIndex].thought += content
+
+        console.log(`[Renderer] Updated step ${stepIndex} thought, length: ${turn.steps[stepIndex].thought.length}`)
         appStore.setTurns(updatedTurns)
+      } else {
+        console.log('[Renderer] No turn found for executionId:', data.execution_id)
       }
 
     })

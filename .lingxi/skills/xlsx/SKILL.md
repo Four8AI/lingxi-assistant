@@ -1,9 +1,9 @@
 ---
 name: xlsx
-description: "Comprehensive spreadsheet operations including read, analyze, merge, create, and edit. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv)."
-version: "2.0.0"
-trigger_conditions: "用户请求读取Excel文件、分析数据、合并表格、创建新表格或编辑表格时触发"
-execution_guidelines: "1. 根据operation参数执行相应操作\n2. 返回操作结果或错误信息\n3. 支持多种Excel操作：读取、分析、合并、创建、编辑"
+description: "Comprehensive spreadsheet operations including read, analyze, merge, create, edit, and sort. Supports Excel files (.xlsx, .xlsm) and CSV files (.csv, .tsv)."
+version: "2.1.0"
+trigger_conditions: "用户请求读取Excel文件、分析数据、合并表格、创建新表格、编辑表格或排序表格时触发"
+execution_guidelines: "1. 根据operation参数执行相应操作\n2. 返回操作结果或错误信息\n3. 支持多种Excel操作：读取、分析、合并、创建、编辑、排序"
 author: "Lingxi Team"
 license: MIT
 ---
@@ -111,6 +111,30 @@ Edit an existing Excel file.
 **Example:**
 ```python
 xlsx(operation="edit", file_path="人员信息.xlsx")
+```
+
+### 6. Sort (排序Excel文件)
+
+Sort an Excel file by a specified column.
+
+**Parameters:**
+- `operation` (required): "sort"
+- `file_path` (required): Path to the Excel file
+- `column` (required): Column name to sort by
+- `ascending` (optional): Sort order, true for ascending, false for descending (default: true)
+
+**Returns:**
+- Success: Sort result, original file, sort column, sort order, and output file details
+- Error: Error message
+
+**Example:**
+```python
+xlsx(
+    operation="sort",
+    file_path="人员信息.xlsx",
+    column="年龄",
+    ascending=False
+)
 ```
 
 ## Dependencies

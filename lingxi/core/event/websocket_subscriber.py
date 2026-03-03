@@ -46,7 +46,7 @@ class WebSocketSubscriber:
 
         self.logger.info("WebSocket订阅者已停止监听事件")
 
-    def handle_think_start(self, session_id: str, execution_id: str, **kwargs):
+    async def handle_think_start(self, session_id: str, execution_id: str, **kwargs):
         """处理思考开始事件
 
         Args:
@@ -55,14 +55,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='think_start',
                 execution_id=execution_id,
                 data=kwargs
-            ))
+            )
 
-    def handle_think_stream(self, session_id: str, execution_id: str, content: str, **kwargs):
+    async def handle_think_stream(self, session_id: str, execution_id: str, content: str, **kwargs):
         """处理思考块流式渲染事件
 
         Args:
@@ -73,16 +73,16 @@ class WebSocketSubscriber:
         """
         self.logger.debug(f"Received think_stream event: session_id={session_id}, execution_id={execution_id}, content={content}, kwargs={kwargs}")
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='think_stream',
                 execution_id=execution_id,
                 data={"content": content, **kwargs}
-            ))
+            )
         else:
             self.logger.warning("websocket_manager is None, cannot send think_stream event")
 
-    def handle_think_final(self, session_id: str, execution_id: str, content: str, **kwargs):
+    async def handle_think_final(self, session_id: str, execution_id: str, content: str, **kwargs):
         """处理思考结束事件
 
         Args:
@@ -92,14 +92,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='think_final',
                 execution_id=execution_id,
                 data={"content": content, **kwargs}
-            ))
+            )
 
-    def handle_plan_start(self, session_id: str, execution_id: str, **kwargs):
+    async def handle_plan_start(self, session_id: str, execution_id: str, **kwargs):
         """处理任务规划开始事件
 
         Args:
@@ -108,14 +108,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='plan_start',
                 execution_id=execution_id,
                 data=kwargs
-            ))
+            )
 
-    def handle_plan_final(self, session_id: str, execution_id: str, plan: list, **kwargs):
+    async def handle_plan_final(self, session_id: str, execution_id: str, plan: list, **kwargs):
         """处理任务规划完成事件
 
         Args:
@@ -125,14 +125,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='plan_final',
                 execution_id=execution_id,
                 data={"plan": plan, **kwargs}
-            ))
+            )
 
-    def handle_step_start(self, session_id: str, execution_id: str, step_index: int, **kwargs):
+    async def handle_step_start(self, session_id: str, execution_id: str, step_index: int, **kwargs):
         """处理步骤开始事件
 
         Args:
@@ -142,14 +142,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='step_start',
                 execution_id=execution_id,
                 data={"step_index": step_index, **kwargs}
-            ))
+            )
 
-    def handle_step_end(self, session_id: str, execution_id: str, step_index: int, result: str, **kwargs):
+    async def handle_step_end(self, session_id: str, execution_id: str, step_index: int, result: str, **kwargs):
         """处理步骤执行结束事件
 
         Args:
@@ -160,14 +160,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='step_end',
                 execution_id=execution_id,
                 data={"step_index": step_index, "result": result, **kwargs}
-            ))
+            )
 
-    def handle_task_start(self, session_id: str, execution_id: str, **kwargs):
+    async def handle_task_start(self, session_id: str, execution_id: str, **kwargs):
         """处理任务处理开始事件
 
         Args:
@@ -176,14 +176,14 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='task_start',
                 execution_id=execution_id,
                 data=kwargs
-            ))
+            )
 
-    def handle_task_end(self, session_id: str, execution_id: str, result: str, **kwargs):
+    async def handle_task_end(self, session_id: str, execution_id: str, result: str, **kwargs):
         """处理任务处理最终结果输出事件
 
         Args:
@@ -193,12 +193,12 @@ class WebSocketSubscriber:
             **kwargs: 其他参数
         """
         if self.websocket_manager:
-            asyncio.create_task(self.websocket_manager.send_event(
+            await self.websocket_manager.send_event(
                 session_id=session_id,
                 event_type='task_end',
                 execution_id=execution_id,
                 data={"result": result, **kwargs}
-            ))
+            )
 
     def __del__(self):
         """析构函数，清理订阅"""

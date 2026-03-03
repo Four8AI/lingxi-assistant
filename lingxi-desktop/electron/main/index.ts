@@ -221,9 +221,13 @@ class App {
     })
 
     this.wsClient.on('think_stream', (data) => {
+      console.log('[Date: ' + new Date().toLocaleString() + '] [Main] think_stream received:', JSON.stringify(data).substring(0, 200))
       const mainWindow = this.windowManager.getWindow()
       if (mainWindow) {
+        console.log('[Date: ' + new Date().toLocaleString() + '] [Main] Sending ws:think-stream to renderer')
         mainWindow.webContents.send('ws:think-stream', data)
+      } else {
+        console.log('[Date: ' + new Date().toLocaleString() + '] [Main] No main window available')
       }
     })
 

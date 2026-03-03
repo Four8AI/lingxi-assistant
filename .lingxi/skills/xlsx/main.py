@@ -39,8 +39,10 @@ def execute(parameters: Dict[str, Any]) -> str:
             return _create_excel(parameters)
         elif operation == "edit":
             return _edit_excel(parameters)
+        elif operation == "sort":
+            return _sort_excel(parameters)
         else:
-            return f"错误: 不支持的操作类型 '{operation}'。支持的操作: read, analyze, merge, create, edit"
+            return f"错误: 不支持的操作类型 '{operation}'。支持的操作: read, analyze, merge, create, edit, sort"
 
     except Exception as e:
         logger.error(f"执行XLSX技能失败: {e}")
@@ -221,12 +223,56 @@ def _edit_excel(parameters: Dict[str, Any]) -> str:
     try:
         import pandas as pd
         df = pd.read_excel(file_path)
-        
+
         # 这里可以添加编辑逻辑
         result = f"成功读取Excel文件: {file_path}\n"
         result += f"行数: {len(df)}\n"
         result += f"列数: {len(df.columns)}"
-        
+
         return result
     except Exception as e:
         return f"错误: 编辑Excel文件失败 - {str(e)}"
+
+
+def _sort_excel(parameters: Dict[str, Any]) -> str:
+    """Sort Excel file by specified column"""
+    file_path = parameters.get("file_path")
+    column = parameters.get("column")
+    ascending = parameters.get("ascending", True)
+
+    if not file_path:
+        return "错误: 缺少file_path参数"
+    if not column:
+        return "错误: 缺少column参数"
+
+    if not os.path.exists(file_path):
+        return f"错误: 文件不存在 - {file_path}"
+
+    try:
+        import pandas as pd
+        df = pd.read_excel(file_path)
+
+        if column not in df.columns:
+            return f"错误: 列 '{column}' 不存在。可用列: {list(df.columns)}"
+
+        # 排序
+        df_sorted = df.sort_values(by=column, ascending=ascending)
+
+        # 生成输出文件名
+        base_name = os.path.splitext(file_path)[0]
+        extension = os.path.splitext(file_path)[1]
+        output_file = f"{base_name}_按{column}排序{extension}"
+
+        df_sorted.to_excel(output_file, index=False)
+
+        result = f"成功排序Excel文件!\n\n"
+        result += f"原文件: {file_path}\n"
+        result += f"排序列: {column}\n"
+        result += f"排序方式: {'升序' if ascending else '降序'}\n"
+        result += f"输出文件: {output_file}\n"
+        result += f"行数: {len(df_sorted)}\n"
+        result += f"列数: {len(df_sorted.columns)}"
+
+        return result
+    except Exception as e:
+        return f"错误: 排序Excel文件失败 - {str(e)}"

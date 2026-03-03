@@ -83,13 +83,13 @@ finish(answer) - 完成任务并返回答案
             skills_list=skills_list
         )
 
-    def _build_initial_messages(self, user_input: str, task_plan: str, task_info: Dict[str, Any], history_context: str) -> List[
+    def _build_initial_messages(self, user_input: str, task_plan: List[str], task_info: Dict[str, Any], history_context: str) -> List[
         Dict[str, Any]]:
         """构建初始消息
 
         Args:
             user_input: 用户输入
-            task_plan: 任务计划
+            task_plan: 任务计划列表
             task_info: 任务信息
             history_context: 历史上下文
 
@@ -156,7 +156,7 @@ finish(answer) - 完成任务并返回答案
             final_answer = parsed.get("action_input", "")
             self._publish_step_end(session_id, execution_id, step, "completed", None, final_answer,
                                    parsed.get("thought"), parsed.get("description"))
-            self._publish_task_end(session_id, execution_id, final_answer)
+            # 注意：task_end 事件由调用方 _execute_task_stream 统一发布，这里不再重复发布
 
             self._handle_finish_action(parsed, steps)
             return parsed
@@ -198,10 +198,12 @@ finish(answer) - 完成任务并返回答案
             res = self._execute_step(step, messages, task_level, session_id, execution_id, steps, stream=stream)
             steps.append(res)
 
-        final_response = self._generate_final_response(task, steps, task_level)
-        self._publish_task_end(session_id, execution_id, final_response)
-
-        return {"session_id": session_id, "execution_id": execution_id, "final_response": final_response}
+            # 如果已经执行了finish动作，结束循环
+            if res and res.get("action") == "finish":
+                self.logger.debug("检测到finish动作，结束任务执行")
+                self._publish_task_end(session_id, execution_id, res.get("action_input", ""))
+                return {"session_id": session_id, "execution_id": execution_id, "final_response": res.get("action_input", "")}    
+      
 
     def process(self, user_input: str, task_info: Dict[str, Any], session_history: List[Dict[str, str]] = None,
                 session_id: str = "default", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
