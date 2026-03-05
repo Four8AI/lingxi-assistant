@@ -178,23 +178,27 @@ async def execute_with_stream_events(
         task: 任务文本
         task_info: 任务信息
         history: 会话历史
-        session_id: 会话ID
-        execution_id: 执行ID
+        session_id: 会话 ID
+        execution_id: 执行 ID
         stream: 是否流式输出
 
     Yields:
         事件字典
     """
+    # 生成 task_id
+    task_id = f"task_{session_id}_{execution_id[:8]}" if len(execution_id) > 8 else f"task_{session_id}_{execution_id}"
+    
+    # 在线程函数内部设置 local_context（因为 threading.local 是线程隔离的）
+    def run_engine():
+        from lingxi.core.context import set_ids
+        # 设置当前线程的上下文 ID
+        set_ids(session_id, task_id, execution_id, task)
+        # 执行引擎
+        return engine.process(task, task_info, history, session_id, stream)
+    
     async with StreamEventCollector(session_id, execution_id) as collector:
         task_executor = asyncio.create_task(
-            asyncio.to_thread(
-                engine.process,
-                task,
-                task_info,
-                history,
-                session_id,
-                stream
-            )
+            asyncio.to_thread(run_engine)
         )
 
         async for event in collector.events():

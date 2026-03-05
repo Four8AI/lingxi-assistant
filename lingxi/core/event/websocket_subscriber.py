@@ -6,17 +6,21 @@ from lingxi.web import websocket
 
 
 class WebSocketSubscriber:
-    """WebSocket事件订阅者"""
+    """WebSocket 事件订阅者"""
 
-    def __init__(self, websocket_manager: websocket.WebSocketManager):
-        """初始化WebSocket订阅者
+    def __init__(self, websocket_manager: websocket.WebSocketManager = None):
+        """初始化 WebSocket 订阅者
 
         Args:
-            websocket_manager: WebSocket管理器实例
+            websocket_manager: WebSocket 管理器实例（可选）
         """
         self.websocket_manager = websocket_manager 
         self.logger = logging.getLogger(__name__)
-        self._subscribe_to_events()
+        
+        if websocket_manager:
+            self._subscribe_to_events()
+        else:
+            self.logger.info("WebSocket 管理器未提供，跳过事件订阅")
 
     def _subscribe_to_events(self):
         """订阅事件"""
@@ -30,7 +34,7 @@ class WebSocketSubscriber:
         global_event_publisher.subscribe('task_start', self.handle_task_start)
         global_event_publisher.subscribe('task_end', self.handle_task_end)
 
-        self.logger.info("WebSocket订阅者已初始化，开始监听事件")
+        self.logger.info("WebSocket 订阅者已初始化，开始监听事件")
 
     def _unsubscribe_from_events(self):
         """取消订阅事件"""

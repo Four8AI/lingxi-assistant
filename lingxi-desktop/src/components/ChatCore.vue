@@ -260,7 +260,7 @@ function handleUpload() {
   window.electronAPI.file.selectFiles()
 }
 
-function handleSend() {
+async function handleSend() {
   if (inputText.value.trim()) {
     const userMessage = inputText.value.trim()
     const timestamp = Date.now()
@@ -273,12 +273,49 @@ function handleSend() {
       time: timestamp
     }])
 
-    // 通过 WebSocket 发送消息到后端
-    if (window.electronAPI?.ws && appStore.currentSessionId) {
-      window.electronAPI.ws.sendMessage(userMessage, appStore.currentSessionId)
+    // 创建一个临时的助手消息，用于接收流式响应
+    const tempAssistantMessage = {
+      id: `assistant-${timestamp}`,
+      role: 'assistant',
+      content: '',
+      time: timestamp + 100,
+      executionId: `temp_${timestamp}`,
+      status: 'running',
+      isStreaming: true,
+      isThinking: false,
+      thought: '',
+      steps: [],
+      plan: null
     }
+    appStore.setTurns([...appStore.turns, tempAssistantMessage])
 
     inputText.value = ''
+
+    // 通过 SSE 发送消息到后端
+    if (window.electronAPI?.api && appStore.currentSessionId) {
+      try {
+        await window.electronAPI.api.executeTaskStream(
+          userMessage,
+          appStore.currentSessionId
+        )
+      } catch (error) {
+        console.error('Failed to send message:', error)
+        // 更新助手消息为失败状态
+        const updatedTurns = [...appStore.turns]
+        const targetIndex = updatedTurns.findIndex(turn => turn.executionId === `temp_${timestamp}`)
+        if (targetIndex !== -1) {
+          updatedTurns[targetIndex] = {
+            ...updatedTurns[targetIndex],
+            status: 'failed',
+            error: '发送消息失败',
+            isStreaming: false
+          }
+          appStore.setTurns(updatedTurns)
+        }
+      }
+    } else if (!appStore.currentSessionId) {
+      console.error('No current session ID')
+    }
   }
 }
 

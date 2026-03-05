@@ -88,11 +88,11 @@ export class ApiClient {
     user_name?: string
     sort_by?: string
     order?: string
-  }): Promise<ApiResponse<{total: number; page: number; page_size: number; sessions: Session[]}>> {
+  }): Promise<{sessions: Session[]}> {
     return this.client.get('/api/sessions', { params })
   }
 
-  async getSession(sessionId: string): Promise<ApiResponse<SessionDetail>> {
+  async getSession(sessionId: string): Promise<SessionDetail> {
     return this.client.get(`/api/sessions/${sessionId}`)
   }
 
@@ -100,14 +100,14 @@ export class ApiClient {
     max_turns?: number
     include_steps?: boolean
     task_status?: string
-  }): Promise<ApiResponse<{session_id: string; total_turns: number; history: HistoryItem[]}>> {
+  }): Promise<{session_id: string; total_turns: number; history: HistoryItem[]}> {
     return this.client.get(`/api/sessions/${sessionId}/history`, { params })
   }
 
   async createSession(data: {
     user_name?: string
     title?: string
-  }): Promise<ApiResponse<Session>> {
+  }): Promise<{session_id: string; first_message?: string}> {
     return this.client.post('/api/sessions', data)
   }
 

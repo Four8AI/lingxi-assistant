@@ -46,19 +46,26 @@ app.include_router(sessions.router, prefix="/api", tags=["sessions"])
 
 @app.on_event("startup")
 async def startup_event():
-    """FastAPI启动事件"""
+    """FastAPI 启动事件"""
     config = get_config()
     setup_logging(config)
 
-    assistant = LingxiAssistant(config)
-    
-    # 初始化会话存储事件订阅者
-    session_store_subscriber = SessionStoreSubscriber(assistant.session_manager)
+    # 检查助手是否已初始化（由 start_web_server.py 创建）
+    assistant = get_assistant()
+    if assistant is None:
+        # 如果未初始化，则创建新实例
+        from lingxi.__main__ import LingxiAssistant
+        assistant = LingxiAssistant(config)
+        set_assistant(assistant)
+        
+        # 初始化会话存储事件订阅者
+        session_store_subscriber = SessionStoreSubscriber(assistant.session_manager)
+        logger.info("创建新的助手实例")
+    else:
+        logger.info("使用已初始化的助手实例")
 
-    set_assistant(assistant)
-
-    logger.info("初始化FastAPI服务器")
-    logger.info(f"服务器配置: host={config.get('web', {}).get('host')}, port={config.get('web', {}).get('port')}")
+    logger.info("初始化 FastAPI 服务器")
+    logger.info(f"服务器配置：host={config.get('web', {}).get('host')}, port={config.get('web', {}).get('port')}")
 
 
 def init_app(config=None):

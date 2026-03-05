@@ -27,23 +27,24 @@ const activeCheckpoints = computed(() => {
 
 onMounted(async () => {
   await initializeApp()
-  setupWebSocketListeners()
+  setupSSEListeners()
 })
 
 onUnmounted(() => {
-  if (window.electronAPI?.ws) {
-    window.electronAPI.ws.removeAllListeners('ws:connected')
-    window.electronAPI.ws.removeAllListeners('ws:disconnected')
-    window.electronAPI.ws.removeAllListeners('ws:thought-chain')
-    window.electronAPI.ws.removeAllListeners('ws:step-start')
-    window.electronAPI.ws.removeAllListeners('ws:step-end')
-    window.electronAPI.ws.removeAllListeners('ws:task-start')
-    window.electronAPI.ws.removeAllListeners('ws:task-end')
-    window.electronAPI.ws.removeAllListeners('ws:think-start')
-    window.electronAPI.ws.removeAllListeners('ws:think-stream')
-    window.electronAPI.ws.removeAllListeners('ws:think-final')
-    window.electronAPI.ws.removeAllListeners('ws:plan-start')
-    window.electronAPI.ws.removeAllListeners('ws:plan-final')
+  if (window.electronAPI?.sse) {
+    window.electronAPI.sse.removeAllListeners('sse:task-start')
+    window.electronAPI.sse.removeAllListeners('sse:task-end')
+    window.electronAPI.sse.removeAllListeners('sse:think-start')
+    window.electronAPI.sse.removeAllListeners('sse:think-stream')
+    window.electronAPI.sse.removeAllListeners('sse:think-final')
+    window.electronAPI.sse.removeAllListeners('sse:plan-start')
+    window.electronAPI.sse.removeAllListeners('sse:plan-final')
+    window.electronAPI.sse.removeAllListeners('sse:step-start')
+    window.electronAPI.sse.removeAllListeners('sse:step-end')
+    window.electronAPI.sse.removeAllListeners('sse:task-failed')
+    window.electronAPI.sse.removeAllListeners('sse:task-cancelled')
+    window.electronAPI.sse.removeAllListeners('sse:error')
+    window.electronAPI.sse.removeAllListeners('sse:stream-end')
   }
 })
 
@@ -51,22 +52,22 @@ async function initializeApp() {
   appStore.setLoading(true)
 
   try {
-    if (window.electronAPI?.api && window.electronAPI?.ws) {
+    if (window.electronAPI?.api) {
       const [sessions, checkpoints, resourceUsage] = await Promise.all([
         window.electronAPI.api.getSessions(),
         window.electronAPI.api.getCheckpoints(),
         window.electronAPI.api.getResourceUsage()
       ])
 
-      appStore.setSessions(sessions)
-      appStore.setCheckpoints(checkpoints)
+      appStore.setSessions(sessions || [])
+      appStore.setCheckpoints(checkpoints || [])
       appStore.setResourceUsage(resourceUsage)
 
-      if (sessions.length > 0) {
+      if (sessions && sessions.length > 0) {
         appStore.setCurrentSession(sessions[0].id)
         const history = await window.electronAPI.api.getSessionHistory(sessions[0].id)
         // 转换后端返回的历史记录格式为前端期望的格式
-        const turns = history.history.map((item: any, index: number) => ({
+        const turns = (history || []).map((item: any, index: number) => ({
           id: `${sessions[0].id}_${index}`,
           role: item.role,
           content: item.content,
@@ -86,14 +87,12 @@ async function initializeApp() {
         const sessionData = await window.electronAPI.api.createSession()
         const session = {
           id: sessionData.session_id,
-          name: sessionData.user_name || '新会话'
+          name: sessionData.first_message || '新会话'
         }
         appStore.setSessions([session])
         appStore.setCurrentSession(session.id)
         appStore.setTurns([])
       }
-
-      await window.electronAPI.ws.connect(appStore.currentSessionId || undefined)
     }
   } catch (error) {
     console.error('Failed to initialize app:', error)
@@ -102,47 +101,9 @@ async function initializeApp() {
   }
 }
 
-function setupWebSocketListeners() {
-  if (window.electronAPI?.ws) {
-    window.electronAPI.ws.onConnected(() => {
-      appStore.setWsConnected(true)
-    })
-
-    window.electronAPI.ws.onDisconnected(() => {
-      appStore.setWsConnected(false)
-    })
-
-    window.electronAPI.ws.onThoughtChain((data) => {
-      console.log('Thought chain:', data)
-      // 找到最近的用户消息或助手消息
-      const latestTurn = appStore.turns[appStore.turns.length - 1]
-      if (latestTurn) {
-        // 将思考链信息添加到消息中
-        const updatedTurns = [...appStore.turns]
-        updatedTurns[updatedTurns.length - 1] = {
-          ...latestTurn,
-          thought_chain: {
-            taskId: data.taskId || Date.now(),
-            steps: data.thoughts || [data.step],
-            status: 'running'
-          }
-        }
-        appStore.setTurns(updatedTurns)
-      }
-      
-      // 同时更新全局思考链
-      if (appStore.thoughtChain) {
-        appStore.thoughtChain.steps.push(data.step)
-      } else {
-        appStore.setThoughtChain({
-          taskId: data.taskId || Date.now(),
-          steps: [data.step],
-          status: 'running'
-        })
-      }
-    })
-
-    window.electronAPI.ws.onTaskStart((data) => {
+function setupSSEListeners() {
+  if (window.electronAPI?.sse) {
+    window.electronAPI.sse.onTaskStart((data) => {
       console.log('Task started:', data)
       // 查找是否已存在临时助手消息
       const updatedTurns = [...appStore.turns]
@@ -154,7 +115,7 @@ function setupWebSocketListeners() {
       )
       
       if (tempIndex !== -1) {
-        // 更新临时助手消息的执行ID和状态
+        // 更新临时助手消息的执行 ID 和状态
         updatedTurns[tempIndex] = {
           ...updatedTurns[tempIndex],
           executionId: data.executionId,
@@ -180,7 +141,7 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onTaskEnd((data) => {
+    window.electronAPI.sse.onTaskEnd((data) => {
       console.log('Task ended:', data)
       // 更新助手消息的内容
       if (data.result) {
@@ -209,7 +170,7 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onThinkStart((data) => {
+    window.electronAPI.sse.onThinkStart((data) => {
       console.log('Think started:', data)
       // 找到对应的助手消息，添加思考开始标记
       const updatedTurns = [...appStore.turns]
@@ -223,9 +184,9 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onThinkStream((data) => {
+    window.electronAPI.sse.onThinkStream((data) => {
       console.log('[Renderer] Think stream received:', data)
-      // 找到对应的助手消息，将思考内容添加到具体的step对象上
+      // 找到对应的助手消息，将思考内容添加到具体的 step 对象上
       const updatedTurns = [...appStore.turns]
       const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.execution_id)
       if (targetIndex !== -1) {
@@ -262,7 +223,7 @@ function setupWebSocketListeners() {
 
     })
 
-    window.electronAPI.ws.onThinkFinal((data) => {
+    window.electronAPI.sse.onThinkFinal((data) => {
       console.log('Think final:', data)
       // 找到对应的助手消息，完成思考标记并更新步骤的思考内容
       const updatedTurns = [...appStore.turns]
@@ -271,7 +232,7 @@ function setupWebSocketListeners() {
         const turn = updatedTurns[targetIndex]
         turn.isThinking = false
         
-        // 将最终思考内容添加到具体的step对象上
+        // 将最终思考内容添加到具体的 step 对象上
         if (turn.steps) {
           // 获取当前步骤索引，默认为最后一个步骤
           const stepIndex = data.step_index || turn.steps.length - 1
@@ -286,11 +247,11 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onPlanStart((data) => {
+    window.electronAPI.sse.onPlanStart((data) => {
       console.log('Plan started:', data)
     })
 
-    window.electronAPI.ws.onPlanFinal((data) => {
+    window.electronAPI.sse.onPlanFinal((data) => {
       console.log('Plan final:', data)
       // 找到对应的助手消息，添加计划信息
       const updatedTurns = [...appStore.turns]
@@ -307,7 +268,7 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onStepStart((data) => {
+    window.electronAPI.sse.onStepStart((data) => {
       console.log('Step started:', data)
       // 找到对应的助手消息，添加步骤开始信息
       const updatedTurns = [...appStore.turns]
@@ -334,7 +295,7 @@ function setupWebSocketListeners() {
             status: 'running'
           })
           
-          // 按照stepIndex排序步骤
+          // 按照 stepIndex 排序步骤
           updatedTurns[targetIndex].steps.sort((a, b) => a.stepIndex - b.stepIndex)
         }
         
@@ -342,7 +303,7 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onStepEnd((data) => {
+    window.electronAPI.sse.onStepEnd((data) => {
       console.log('Step ended:', data)
       // 找到对应的助手消息，更新步骤状态
       const updatedTurns = [...appStore.turns]
@@ -362,7 +323,7 @@ function setupWebSocketListeners() {
       }
     })
 
-    window.electronAPI.ws.onTaskFailed((data) => {
+    window.electronAPI.sse.onTaskFailed((data) => {
       console.log('Task failed:', data)
       // 找到对应的助手消息，添加失败信息
       const updatedTurns = [...appStore.turns]

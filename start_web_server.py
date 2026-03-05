@@ -12,6 +12,9 @@ sys.path.insert(0, str(project_root))
 
 from lingxi.web.fastapi_server import run_server
 from lingxi.utils.config import get_config
+from lingxi.web.websocket import WebSocketManager
+from lingxi.web.state import set_websocket_manager, set_assistant
+from lingxi.__main__ import LingxiAssistant
 
 
 def main():
@@ -37,20 +40,43 @@ def main():
         print()
 
     print(f"服务器地址: http://{host}:{port}")
-    print(f"WebSocket端点: ws://{host}:{port}/ws")
-    print(f"Web界面: http://{host}:{port}/static/index.html")
-    print(f"API文档: http://{host}:{port}/docs")
+    print(f"WebSocket 端点：ws://{host}:{port}/ws")
+    print(f"Web 界面：http://{host}:{port}/static/index.html")
+    print(f"API 文档：http://{host}:{port}/docs")
     print()
     print("按 Ctrl+C 停止服务器")
     print("=" * 60)
     print()
+
+    # 初始化助手和 WebSocket 管理器
+    try:
+        assistant = LingxiAssistant(config)
+        set_assistant(assistant)
+        
+        # 可选：是否启用 WebSocket 事件推送（默认禁用，避免与 HTTP SSE 冲突）
+        enable_websocket_events = web_config.get('enable_websocket_events', False)
+        
+        if enable_websocket_events:
+            websocket_manager = WebSocketManager(assistant)
+            set_websocket_manager(websocket_manager)
+            print("WebSocket 事件推送：已启用")
+        else:
+            print("WebSocket 事件推送：已禁用（使用 HTTP SSE 流式响应）")
+        
+        print("助手已初始化")
+        print()
+    except Exception as e:
+        print(f"初始化失败：{e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
     try:
         run_server(config)
     except KeyboardInterrupt:
         print("\n\n服务器已停止")
     except Exception as e:
-        print(f"\n\n服务器启动失败: {e}")
+        print(f"\n\n服务器启动失败：{e}")
         sys.exit(1)
 
 

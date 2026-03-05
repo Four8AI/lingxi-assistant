@@ -19,7 +19,7 @@
         :key="session.id"
         class="history-chat-item"
         :class="{ active: session.id === currentSessionId }"
-        @click="handleSelectSession(session.id)"
+        @click="session.id && handleSelectSession(session.id)"
       >
         <div class="history-chat-item-icon">
           <el-icon><ChatDotRound /></el-icon>
@@ -62,7 +62,8 @@ const appStore = useAppStore()
 const { sessions, currentSessionId } = storeToRefs(appStore)
 
 const filteredSessions = computed(() => {
-  return sessions.value
+  // 过滤掉没有有效 id 的会话
+  return sessions.value.filter(session => session && session.id)
 })
 
 function truncateSessionName(name: string, maxLength: number = 10): string {
@@ -77,7 +78,7 @@ async function handleNewSession() {
     // 转换后端返回的会话数据格式为前端期望的格式
     const session = {
       id: sessionData.session_id,
-      name: sessionData.user_name || '新会话'
+      name: sessionData.first_message || '新会话'
     }
     appStore.setSessions([...sessions.value, session])
     await handleSelectSession(session.id)
@@ -88,6 +89,14 @@ async function handleNewSession() {
 
 async function handleSelectSession(sessionId: string) {
   console.log('handleSelectSession called with sessionId:', sessionId)
+  
+  // 检查 sessionId 是否有效
+  if (!sessionId) {
+    console.error('Invalid sessionId')
+    appStore.setTurns([])
+    return
+  }
+  
   appStore.setCurrentSession(sessionId)
   
   try {
@@ -141,7 +150,7 @@ async function handleSelectSession(sessionId: string) {
         const sessionData = await window.electronAPI.api.createSession()
         const session = {
           id: sessionData.session_id,
-          name: sessionData.user_name || '新会话'
+          name: sessionData.first_message || '新会话'
         }
         appStore.setSessions([...sessions.value, session])
         appStore.setCurrentSession(session.id)

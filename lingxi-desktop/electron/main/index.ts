@@ -56,13 +56,18 @@ class App {
     })
 
     ipcMain.handle('api:get-sessions', async () => {
-      return this.apiClient.getSessions()
+      const result = await this.apiClient.getSessions()
+      return result.sessions
     })
     ipcMain.handle('api:get-session-history', async (_, sessionId, maxTurns) => {
-      return this.apiClient.getSessionHistory(sessionId, maxTurns)
+      if (!sessionId) {
+        return []
+      }
+      const result = await this.apiClient.getSessionHistory(sessionId, maxTurns)
+      return result.history
     })
     ipcMain.handle('api:create-session', async (_, userName) => {
-      return this.apiClient.createSession(userName)
+      return this.apiClient.createSession({ user_name: userName || undefined })
     })
 
     ipcMain.handle('api:delete-session', async (_, sessionId) => {
@@ -100,7 +105,8 @@ class App {
       return this.apiClient.cancelTask(taskId)
     })
     ipcMain.handle('api:get-checkpoints', async () => {
-      return this.apiClient.getCheckpoints()
+      const result = await this.apiClient.getCheckpoints()
+      return result.checkpoints
     })
     ipcMain.handle('api:resume-checkpoint', async (_, sessionId) => {
       return this.apiClient.resumeCheckpoint(sessionId)
@@ -109,7 +115,8 @@ class App {
       return this.apiClient.deleteCheckpoint(sessionId)
     })
     ipcMain.handle('api:get-skills', async () => {
-      return this.apiClient.getSkills()
+      const result = await this.apiClient.getSkills()
+      return result.skills
     })
     ipcMain.handle('api:install-skill', async (_, skillData, skillFiles, autoFix) => {
       return this.apiClient.installSkill({
@@ -135,6 +142,9 @@ class App {
     })
 
     ipcMain.handle('api:get-session-info', async (_, sessionId) => {
+      if (!sessionId) {
+        throw new Error('Session ID is required')
+      }
       return this.apiClient.getSession(sessionId)
     })
 

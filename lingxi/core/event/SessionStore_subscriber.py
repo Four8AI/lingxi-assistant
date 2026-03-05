@@ -68,6 +68,12 @@ class SessionStoreSubscriber:
             else:
                 self.logger.debug(f"会话已存在：session={session_id}")
             
+            # 检查任务是否已存在，避免重复创建
+            existing_task = self.sessionManage.get_task(session_id, task_id)
+            if existing_task:
+                self.logger.debug(f"任务已存在，跳过创建：session={session_id}, task={task_id}")
+                return
+            
             # 创建任务
             self.logger.info(f"创建任务：session={session_id}, task={task_id}")
             self.sessionManage.create_task(
@@ -103,6 +109,12 @@ class SessionStoreSubscriber:
                 self.sessionManage.create_session_by_id(session_id=session_id)
             else:
                 self.logger.debug(f"会话已存在：session={session_id}")
+            
+            # 检查任务是否已存在，避免重复创建
+            existing_task = self.sessionManage.get_task(session_id, task_id)
+            if existing_task:
+                self.logger.debug(f"任务已存在，跳过创建：session={session_id}, task={task_id}")
+                return
             
             # 创建任务
             self.logger.info(f"创建任务：session={session_id}, task={task_id}")

@@ -571,24 +571,41 @@ class BaseEngine:
         raise NotImplementedError("子类必须实现 _execute_task_stream 方法")
 
     def _execute_new_task(self, task: str, task_info: Dict[str, Any], history: List[Dict[str, str]] = None,
-                         session_id: str = "default", stream: bool = False) -> Union[str, Generator[Dict[str, Any], None, None]]:
+                         session_id: str = "default", stream: bool = False, 
+                         execution_id: str = None, task_id: str = None) -> Union[str, Generator[Dict[str, Any], None, None]]:
         """执行新任务（统一使用流式处理逻辑）
 
         Args:
             task: 任务文本
             task_info: 任务信息
             history: 会话历史
-            session_id: 会话ID
+            session_id: 会话 ID
             stream: 是否启用流式输出
+            execution_id: 执行 ID（可选，外部传入）
+            task_id: 任务 ID（可选，外部传入）
 
         Returns:
             执行结果（非流式）或流式响应生成器（流式）
         """
         try:
             self.logger.debug(f"开始执行新任务：{task} (stream={stream})")
-            task_id = f"task_{session_id}_{uuid.uuid4().hex[:8]}"
-            execution_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
-            set_ids(session_id,task_id,execution_id,task);
+            
+            # 优先从 local_context 获取 ID（外部传入）
+            from lingxi.core.context import local_context
+            
+            if task_id is None:
+                task_id = getattr(local_context, 'task_id', None)
+                if task_id is None:
+                    task_id = f"task_{session_id}_{uuid.uuid4().hex[:8]}"
+                    
+            if execution_id is None:
+                execution_id = getattr(local_context, 'execution_id', None)
+                if execution_id is None:
+                    execution_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
+            
+            # 设置上下文 ID
+            set_ids(session_id, task_id, execution_id, task)
+            
             self.logger.debug(f"生成任务 ID：{task_id}")
             self.logger.debug(f"生成执行 ID：{execution_id}")
             self._publish_task_start(session_id, execution_id, task, task_info)

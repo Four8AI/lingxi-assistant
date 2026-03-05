@@ -1,7 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from lingxi.web.state import get_assistant
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -9,6 +12,11 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     """创建会话请求模型"""
     userName: Optional[str] = None
+    user_name: Optional[str] = None  # 兼容 snake_case 格式
+    
+    class Config:
+        # 允许使用别名
+        populate_by_name = True
 
 
 class UpdateSessionRequest(BaseModel):
@@ -45,7 +53,7 @@ async def get_sessions() -> Dict[str, Any]:
         sessions = assistant.session_manager.list_all_sessions()
         return {"sessions": sessions}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取会话列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取会话列表失败：{str(e)}")
 
 
 @router.post("/sessions")
@@ -65,13 +73,20 @@ async def create_session(request: CreateSessionRequest) -> Dict[str, Any]:
     try:
         import uuid
         session_id = f"session_{uuid.uuid4().hex[:8]}"
-        assistant.session_manager.create_session(session_id)
+        
+        # 兼容 userName 和 user_name 字段
+        user_name = request.userName if request.userName else (request.user_name if request.user_name else "新会话")
+        
+        # 使用 create_session_by_id 方法，传入 session_id 和 user_name
+        assistant.session_manager.create_session_by_id(session_id, user_name)
+        
         return {
             "session_id": session_id,
-            "first_message": request.userName or "新会话"
+            "first_message": user_name
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建会话失败: {str(e)}")
+        logger.error(f"创建会话失败：{e}")
+        raise HTTPException(status_code=500, detail=f"创建会话失败：{str(e)}")
 
 
 @router.get("/sessions/{session_id}")
@@ -79,7 +94,7 @@ async def get_session(session_id: str) -> Dict[str, Any]:
     """获取会话详情
 
     Args:
-        session_id: 会话ID
+        session_id: 会话 ID
 
     Returns:
         会话详情
@@ -96,7 +111,7 @@ async def get_session(session_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取会话详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取会话详情失败：{str(e)}")
 
 
 @router.get("/sessions/{session_id}/history")
@@ -104,7 +119,7 @@ async def get_session_history(session_id: str, max_turns: int = 20) -> Dict[str,
     """获取会话历史
 
     Args:
-        session_id: 会话ID
+        session_id: 会话 ID
         max_turns: 最大返回轮数
 
     Returns:
@@ -126,7 +141,7 @@ async def get_session_history(session_id: str, max_turns: int = 20) -> Dict[str,
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取会话历史失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取会话历史失败：{str(e)}")
 
 
 @router.patch("/sessions/{session_id}")
@@ -134,7 +149,7 @@ async def update_session(session_id: str, request: UpdateSessionRequest) -> Dict
     """更新会话（重命名）
 
     Args:
-        session_id: 会话ID
+        session_id: 会话 ID
         request: 更新请求
 
     Returns:
@@ -148,11 +163,11 @@ async def update_session(session_id: str, request: UpdateSessionRequest) -> Dict
         success = assistant.session_manager.rename_session(session_id, request.name)
         if not success:
             raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
-        return {"success": True, "message": f"会话已重命名为: {request.name}"}
+        return {"success": True, "message": f"会话已重命名为：{request.name}"}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"更新会话失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新会话失败：{str(e)}")
 
 
 @router.delete("/sessions/{session_id}")
@@ -160,7 +175,7 @@ async def delete_session(session_id: str) -> Dict[str, Any]:
     """删除会话
 
     Args:
-        session_id: 会话ID
+        session_id: 会话 ID
 
     Returns:
         删除结果
@@ -173,11 +188,11 @@ async def delete_session(session_id: str) -> Dict[str, Any]:
         success = assistant.session_manager.delete_session(session_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在")
-        return {"success": True, "message": f"会话已删除: {session_id}"}
+        return {"success": True, "message": f"会话已删除：{session_id}"}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除会话失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除会话失败：{str(e)}")
 
 
 @router.delete("/sessions/{session_id}/history")
@@ -185,7 +200,7 @@ async def clear_session_history(session_id: str) -> Dict[str, Any]:
     """清空会话历史
 
     Args:
-        session_id: 会话ID
+        session_id: 会话 ID
 
     Returns:
         清空结果
@@ -196,6 +211,6 @@ async def clear_session_history(session_id: str) -> Dict[str, Any]:
 
     try:
         assistant.session_manager.clear_session(session_id)
-        return {"success": True, "message": f"会话历史已清空: {session_id}"}
+        return {"success": True, "message": f"会话历史已清空：{session_id}"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清空会话历史失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清空会话历史失败：{str(e)}")
