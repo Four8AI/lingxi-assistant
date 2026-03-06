@@ -190,6 +190,39 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         cursor = conn.cursor()
         
+        # 检查并迁移旧表结构
+        cursor.execute("PRAGMA table_info(sessions)")
+        columns = {row[1]: row[2] for row in cursor.fetchall()}
+        
+        # 如果表存在但缺少 title 列，添加该列
+        if columns and 'title' not in columns:
+            self.logger.info("检测到旧版数据库表结构，添加 title 列")
+            cursor.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT '新会话'")
+        
+        # 如果表存在但缺少 current_task_id 列，添加该列
+        if columns and 'current_task_id' not in columns:
+            self.logger.info("检测到旧版数据库表结构，添加 current_task_id 列")
+            cursor.execute("ALTER TABLE sessions ADD COLUMN current_task_id TEXT")
+        
+        # 如果表存在但缺少 total_tokens 列，添加该列
+        if columns and 'total_tokens' not in columns:
+            self.logger.info("检测到旧版数据库表结构，添加 total_tokens 列")
+            cursor.execute("ALTER TABLE sessions ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0")
+        
+        # 检查 tasks 表结构
+        cursor.execute("PRAGMA table_info(tasks)")
+        task_columns = {row[1]: row[2] for row in cursor.fetchall()}
+        
+        # 如果 tasks 表存在但缺少 input_tokens 列，添加该列
+        if task_columns and 'input_tokens' not in task_columns:
+            self.logger.info("检测到旧版数据库表结构，添加 input_tokens 列")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0")
+        
+        # 如果 tasks 表存在但缺少 output_tokens 列，添加该列
+        if task_columns and 'output_tokens' not in task_columns:
+            self.logger.info("检测到旧版数据库表结构，添加 output_tokens 列")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
+        
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
@@ -798,9 +831,10 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO sessions (session_id, checkpoint_json, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (session_id, json.dumps(state, ensure_ascii=False)))
+            UPDATE sessions 
+            SET checkpoint_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        """, (json.dumps(state, ensure_ascii=False), session_id))
         conn.commit()
         conn.close()
 
@@ -1054,37 +1088,35 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT session_id, title, task_list, created_at, updated_at
-            FROM sessions
-            ORDER BY updated_at DESC
+            SELECT s.session_id, s.title, s.created_at, s.updated_at, COUNT(t.task_id) as task_count
+            FROM sessions s
+            LEFT JOIN tasks t ON s.session_id = t.session_id
+            GROUP BY s.session_id
+            ORDER BY s.updated_at DESC
         """)
         rows = cursor.fetchall()
         conn.close()
 
         sessions = []
-        for session_id, title, task_list_json, created_at, updated_at in rows:
+        for session_id, title, created_at, updated_at, task_count in rows:
             try:
-                # 从 task_list 组装历史记录以获取消息数量
-                task_list = json.loads(task_list_json) if task_list_json else {}
-                message_count = 0
-                first_message = ""
+                # 获取该会话的第一条用户消息
+                cursor = sqlite3.connect(self.db_path)
+                c = cursor.cursor()
+                c.execute("""
+                    SELECT user_input FROM tasks
+                    WHERE session_id = ? AND user_input IS NOT NULL
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                """, (session_id,))
+                first_message_row = c.fetchone()
+                first_message = first_message_row[0][:50] if first_message_row and first_message_row[0] else ""
+                cursor.close()
                 
-                # 遍历任务计算消息数量并获取第一条用户消息
-                for task in task_list.values():
-                    if isinstance(task, dict):
-                        if task.get('user_input'):
-                            message_count += 1
-                            if not first_message:
-                                first_message = task.get('user_input', '')[:50]
-                        if task.get('result'):
-                            message_count += 1
-                        if task.get('steps'):
-                            message_count += len(task.get('steps', [])) * 2  # 每个步骤包含思考和结果
-
                 sessions.append({
                     "session_id": session_id,
                     "title": title,
-                    "message_count": message_count,
+                    "message_count": task_count,
                     "first_message": first_message,
                     "created_at": created_at,
                     "updated_at": updated_at,
@@ -1109,7 +1141,7 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT session_id, title, token_count, task_list, checkpoint_json, created_at, updated_at
+            SELECT session_id, title, total_tokens, checkpoint_json, created_at, updated_at
             FROM sessions
             WHERE session_id = ?
         """, (session_id,))
@@ -1119,21 +1151,40 @@ class SessionManager:
         if not row:
             return None
 
-        session_id, title, token_count, task_list_json, checkpoint_json, created_at, updated_at = row
+        session_id, title, total_tokens, checkpoint_json, created_at, updated_at = row
         
-        # 从 task_list 组装历史记录
-        task_list = json.loads(task_list_json) if task_list_json else {}
+        # 获取该会话的所有任务
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT task_id, task_type, user_input, result, status, created_at, updated_at
+            FROM tasks
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+        """, (session_id,))
+        task_rows = cursor.fetchall()
+        conn.close()
         
-        # 遍历任务，按时间顺序排序
-        sorted_tasks = sorted(task_list.values(), key=lambda t: t.get('created_at', 0) if isinstance(t, dict) else getattr(t, 'created_at', datetime.now()).timestamp())
-
+        # 组装任务列表
+        task_list = []
+        for task_row in task_rows:
+            task_id, task_type, user_input, result, status, task_created_at, task_updated_at = task_row
+            task_list.append({
+                "task_id": task_id,
+                "task_type": task_type,
+                "user_input": user_input,
+                "result": result,
+                "status": status,
+                "created_at": task_created_at,
+                "updated_at": task_updated_at
+            })
 
         return {
             "session_id": session_id,
             "title": title,
-            "task_count": len(sorted_tasks),
-            "task_list": sorted_tasks,
-            "token_count": token_count,
+            "task_count": len(task_list),
+            "task_list": task_list,
+            "total_tokens": total_tokens,
             "created_at": created_at,
             "updated_at": updated_at,
             "has_checkpoint": checkpoint_json is not None
@@ -1207,9 +1258,9 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO sessions (session_id, user_name, title, task_list, token_count)
-            VALUES (?, ?, ?, ?, ?)
-        """, (session_id, user_name, "新会话", json.dumps({}), 0))
+            INSERT INTO sessions (session_id, user_name, title, total_tokens)
+            VALUES (?, ?, ?, ?)
+        """, (session_id, user_name, "新会话", 0))
         conn.commit()
         conn.close()
         
@@ -1232,9 +1283,9 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO sessions (session_id, user_name, title, task_list, token_count)
-            VALUES (?, ?, ?, ?, ?)
-        """, (session_id, user_name, "新会话", json.dumps({}), 0))
+            INSERT INTO sessions (session_id, user_name, title, total_tokens)
+            VALUES (?, ?, ?, ?)
+        """, (session_id, user_name, "新会话", 0))
         conn.commit()
         conn.close()
         

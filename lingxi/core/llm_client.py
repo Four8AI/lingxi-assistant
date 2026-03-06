@@ -18,7 +18,7 @@ class LLMClient:
         self.logger = logging.getLogger(__name__)
 
         self.provider = self.llm_config.get("provider", "openai")
-        self.api_key = self.llm_config.get("api_key", "")
+        self.api_key = os.getenv("DASHSCOPE_API_KEY") or self.llm_config.get("api_key", "")
         self.model = self.llm_config.get("model", "gpt-4")
         self.temperature = self.llm_config.get("temperature", 0.7)
         self.max_tokens = self.llm_config.get("max_tokens", 2048)

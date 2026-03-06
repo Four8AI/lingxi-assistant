@@ -250,9 +250,7 @@ def create_session():
         session_id = f"session_{int(time.time() * 1000)}"
         
         if name:
-            history = [{"role": "system", "type": "title", "content": name, "time": time.time()}]
-            session_manager.memory_cache[session_id] = history
-            session_manager._save_to_db(session_id, history)
+            session_manager.create_session_by_id(session_id, name)
         
         return jsonify({'session_id': session_id, 'name': name})
     except Exception as e:

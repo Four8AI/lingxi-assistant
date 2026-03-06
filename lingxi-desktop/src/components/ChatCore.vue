@@ -265,6 +265,25 @@ async function handleSend() {
     const userMessage = inputText.value.trim()
     const timestamp = Date.now()
 
+    // 如果没有当前会话，创建一个新会话
+    if (!appStore.currentSessionId) {
+      try {
+        const result = await window.electronAPI.api.createSession('新会话')
+        if (result && result.data && result.data.session_id) {
+          appStore.setCurrentSession(result.data.session_id)
+          appStore.setSessions([...appStore.sessions, {
+            id: result.data.session_id,
+            name: '新会话'
+          }])
+        } else {
+          throw new Error('创建会话失败')
+        }
+      } catch (error) {
+        console.error('Failed to create session:', error)
+        return
+      }
+    }
+
     // 添加用户消息到聊天区
     appStore.setTurns([...appStore.turns, {
       id: `user-${timestamp}`,
@@ -313,8 +332,6 @@ async function handleSend() {
           appStore.setTurns(updatedTurns)
         }
       }
-    } else if (!appStore.currentSessionId) {
-      console.error('No current session ID')
     }
   }
 }
