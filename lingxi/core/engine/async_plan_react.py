@@ -385,6 +385,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         last_thought = ""
         try:
             full_response = ""
+            self._publish_think_start(session_id, execution_id, 0, "")
             async for chunk in self.async_llm_client.stream_chat(messages, task_info.get("level", "simple"), enable_thinking=False):
                 choices = chunk.get("choices", [])
                 if choices:
@@ -401,7 +402,8 @@ class AsyncPlanReActEngine(AsyncReActCore):
                                 incremental_thought = thought[len(last_thought):] if last_thought else thought
                                 last_thought = thought
                                 self._publish_think_stream(session_id, execution_id, -1, incremental_thought)
-                   
+
+            self._publish_think_end(session_id, execution_id, 0, last_thought)
                         
 
             import json

@@ -100,6 +100,8 @@ class PlanReActCore(ReActCore):
         full_response = ""
         last_thought = ""
 
+        self._publish_think_start(session_id, execution_id, 0, "")
+
         for chunk in stream_response:
             if hasattr(chunk, 'choices') and chunk.choices:
                 delta = chunk.choices[0].delta
@@ -110,6 +112,8 @@ class PlanReActCore(ReActCore):
                         incremental_thought = thought[len(last_thought):] if last_thought else thought
                         self._publish_think_stream(session_id, execution_id, 0, incremental_thought)
                         last_thought = thought
+
+        self._publish_think_end(session_id, execution_id, 0, last_thought)
 
         return self._parse_analysis_response(full_response)
 
@@ -455,7 +459,9 @@ class PlanReActCore(ReActCore):
         self.logger.debug(f"直接执行行动: action={action}, thought={thought[:50]}...")
         self._publish_step_start(session_id, execution_id, 0, 1)
         if thought:
+            self._publish_think_start(session_id, execution_id, 0, "")
             self._publish_think_stream(session_id, execution_id, 0, thought)
+            self._publish_think_end(session_id, execution_id, 0, thought)
 
         if action == "finish":
             result = action_input if isinstance(action_input, str) else str(action_input)

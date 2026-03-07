@@ -57,7 +57,7 @@ class ConfirmationManager:
         self._response_callbacks: Dict[str, Callable] = {}
         self.logger = logging.getLogger(__name__)
         
-        self.logger.info(f"确认管理器初始化: timeout={timeout}s, auto_reject={auto_reject_timeout}")
+        self.logger.debug(f"确认管理器初始化: timeout={timeout}s, auto_reject={auto_reject_timeout}")
     
     def create_request(
         self,

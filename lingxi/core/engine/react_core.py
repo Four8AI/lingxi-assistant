@@ -142,6 +142,7 @@ finish(answer) - 完成任务并返回答案
 
         full_response = ""
         usage = None
+        self._publish_think_start(session_id, execution_id, 0, "")
         for response_chunk in self._process_llm_response(messages, task_level, stream):
             if response_chunk["type"] == "thought_chunk":
                 content = response_chunk["content"]
@@ -150,7 +151,8 @@ finish(answer) - 完成任务并返回答案
                 full_response = response_chunk["response"]
                 usage = response_chunk.get("usage")
                 break
-
+                
+        self._publish_think_end(session_id, execution_id, 0, parsed.get("thought", ""))
         parsed = self._parse_response(full_response)
 
         if not parsed:

@@ -328,8 +328,8 @@ class BaseEngine:
         """发布思考流式事件
 
         Args:
-            session_id: 会话ID
-            execution_id: 执行ID
+            session_id: 会话 ID
+            execution_id: 执行 ID
             step: 步骤索引
             content: 思考内容
         """
@@ -341,6 +341,40 @@ class BaseEngine:
             content=content,
             body={"reasoning_content": content},
             is_partial=True
+        )
+
+    def _publish_think_start(self, session_id: str, execution_id: str, step: int, content: str):
+        """发布思考开始事件
+
+        Args:
+            session_id: 会话 ID
+            execution_id: 执行 ID
+            step: 步骤索引
+            content: 初始思考内容
+        """
+        global_event_publisher.publish(
+            'think_start',
+            session_id=session_id,
+            execution_id=execution_id,
+            step_index=step,
+            content=content
+        )
+
+    def _publish_think_end(self, session_id: str, execution_id: str, step: int, content: str):
+        """发布思考结束事件
+
+        Args:
+            session_id: 会话 ID
+            execution_id: 执行 ID
+            step: 步骤索引
+            content: 最终思考内容
+        """
+        global_event_publisher.publish(
+            'think_end',
+            session_id=session_id,
+            execution_id=execution_id,
+            step_index=step,
+            content=content
         )
 
     def _publish_step_start(self, session_id: str, execution_id: str, step_idx: int, total_steps: int):

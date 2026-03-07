@@ -1,75 +1,42 @@
+"""同步灵犀智能助手主类"""
+
 import sys
 import logging
 import argparse
 from typing import Optional, Union, Any, Dict, List
-from lingxi.utils.config import load_config
-from lingxi.utils.logging import setup_logging
-from lingxi.core.session import SessionManager
-from lingxi.core.classifier import TaskClassifier
-from lingxi.core.mode_selector import ExecutionModeSelector
-from lingxi.core.skill_caller import SkillCaller
-from lingxi.core.event.console_subscriber import ConsoleSubscriber
-from lingxi.core.event.SessionStore_subscriber import SessionStoreSubscriber
+from lingxi.core.assistant_base import BaseAssistant
 from lingxi.core.context import TaskContext
+from lingxi.utils.config import load_config
 
 
-class LingxiAssistant:
-    """灵犀智能助手主类"""
-
-    def __init__(self, config_path_or_obj: Union[str, Dict[str, Any]] = "config.yaml"):
-        """初始化灵犀助手
-
-        Args:
-            config_path_or_obj: 配置文件路径或配置对象
-        """
-        if isinstance(config_path_or_obj, dict):
-            self.config = config_path_or_obj
-        else:
-            self.config = load_config(config_path_or_obj)
-        setup_logging(self.config)
-        self.logger = logging.getLogger(__name__)
-
-        self.logger.info(f"启动{self.config.get('system', {}).get('name', '灵犀')}智能助手")
-        self.logger.info(f"版本: {self.config.get('system', {}).get('version', '0.2.0')}")
-
-        self.session_manager = SessionManager(self.config)
-        self.classifier = TaskClassifier(self.config)
-        self.skill_caller = SkillCaller(self.config)
-        self.mode_selector = ExecutionModeSelector(self.config, self.skill_caller)
-        self.console_subscriber = ConsoleSubscriber()
-        self.session_store_subscriber = SessionStoreSubscriber(self.session_manager)
+class LingxiAssistant(BaseAssistant):
+    """同步灵犀智能助手"""
 
     def process_input(self, user_input: str, session_id: str = "default", stream: bool = False) -> Union[str, Any]:
         """处理用户输入
 
         Args:
             user_input: 用户输入
-            session_id: 会话ID
+            session_id: 会话 ID
             stream: 是否启用流式输出
 
         Returns:
             系统响应（非流式）或流式响应生成器（流式）
         """
-        self.logger.debug(f"处理用户输入: {user_input}")
+        self.logger.debug(f"处理用户输入：{user_input}")
 
         try:
-            # 先检查是否是安装技能的请求
             install_result = self._check_install_skill_intent(user_input)
             if install_result:
                 skill_path, skill_name = install_result
                 success = self.install_skill(skill_path, skill_name)
                 if success:
-                    response = f"技能安装成功: {skill_path}"
+                    response = f"技能安装成功：{skill_path}"
                 else:
-                    response = f"技能安装失败: {skill_path}"
+                    response = f"技能安装失败：{skill_path}"
                 return response
 
             history = self.session_manager.get_history(session_id)
-            #task_info = self.classifier.classify(user_input, history)
-            #self.logger.debug(f"任务分类: {task_info}")
-
-            #mode = self.mode_selector.select_mode(task_info["level"])
-            #self.logger.debug(f"选择执行模式: {mode}")
 
             engine = self.mode_selector.get_engine(mode="plan_react", session_manager=self.session_manager)
 
@@ -88,7 +55,7 @@ class LingxiAssistant:
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
-            self.logger.error(f"处理失败: {e}\n{error_trace}")
+            self.logger.error(f"处理失败：{e}\n{error_trace}")
             error_response = f"抱歉，处理您的请求时出现错误：{str(e)}\n\n堆栈信息:\n{error_trace}"
             if stream:
                 def error_generator():
@@ -101,7 +68,7 @@ class LingxiAssistant:
 
         Args:
             user_input: 用户输入
-            session_id: 会话ID
+            session_id: 会话 ID
 
         Returns:
             流式响应生成器
@@ -248,24 +215,6 @@ class LingxiAssistant:
             print(f"版本: {skill['version']}")
             print("-" * 80)
 
-    def install_skill(self, skill_source: str, skill_name: str = None, overwrite: bool = False) -> bool:
-        """安装技能
-
-        Args:
-            skill_source: 技能源路径
-            skill_name: 可选的技能名称
-            overwrite: 是否覆盖已存在的技能目录
-
-        Returns:
-            是否安装成功
-        """
-        return self.skill_caller.builtin_skills.skill_loader.install_skill(
-            skill_source,
-            self.skill_caller.skill_registry,
-            skill_name,
-            overwrite
-        )
-
     def get_context_stats(self, session_id: str = "default"):
         """获取上下文统计信息
 
@@ -355,15 +304,15 @@ class LingxiAssistant:
         """交互式模式
 
         Args:
-            session_id: 会话ID
+            session_id: 会话 ID
         """
         print(f"欢迎使用{self.config.get('system', {}).get('name', '灵犀')}智能助手！")
-        print(f"版本: {self.config.get('system', {}).get('version', '0.2.0')}")
+        print(f"版本：{self.config.get('system', {}).get('version', '0.2.0')}")
         print("输入 'exit' 或 'quit' 退出系统")
         print("输入 '/help' 查看帮助")
         print("=" * 60)
 
-        stream_mode = False  # 默认为非流式模式
+        stream_mode = True  # 默认启用流式输出模式
 
         while True:
             try:

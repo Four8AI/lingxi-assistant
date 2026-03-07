@@ -256,7 +256,7 @@ class AsyncReActCore(BaseEngine):
 
         full_response = ""
         usage = None
-        
+        self._publish_think_start(session_id, execution_id, step, "")
         async for response_chunk in self._process_llm_response(messages, task_level, stream):
             chunk_type = response_chunk["type"]
             
@@ -268,7 +268,8 @@ class AsyncReActCore(BaseEngine):
                 usage = response_chunk.get("usage")
                 self.logger.debug(f"收到完整响应，长度：{len(full_response) if full_response else 0}")
                 break
-
+                
+        self._publish_think_end(session_id, execution_id, step, parsed.get("thought", ""))
         parsed = self._parse_response(full_response)
 
         if not parsed:
