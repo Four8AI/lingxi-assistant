@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 from lingxi.core.engine.plan_react_core import PlanReActCore
 from lingxi.core.context import TaskContext
 from lingxi.core.engine.async_react_core import AsyncReActCore
+from lingxi.core.prompts import PromptTemplates
 
 
 class AsyncPlanReActEngine(AsyncReActCore):
@@ -129,7 +130,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
                     if stream:
                         yield chunk
                     
-                    if chunk.get("type") == "task_end":
+                    if chunk.get("type") == "task_finish":
                         final_result = chunk.get("result", "任务执行完成")
 
                 checkpoint["current_step_idx"] = len(plan)
@@ -180,7 +181,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
             self.logger.warning("检查点显示任务已完成，无需恢复")
             result = checkpoint.get("result", "任务已完成")
             self._publish_task_end(session_id, execution_id, result, task_id, task)
-            yield {"type": "task_end", "result": result}
+            yield {"type": "task_finish", "result": result}
             return
         
         checkpoint["execution_status"] = "running"
@@ -215,7 +216,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
                 if stream:
                     yield chunk
                 
-                if chunk.get("type") == "task_end":
+                if chunk.get("type") == "task_finish":
                     final_result = chunk.get("result", "任务执行完成")
 
             checkpoint["current_step_idx"] = len(plan)
@@ -326,8 +327,6 @@ class AsyncPlanReActEngine(AsyncReActCore):
         if action == "finish":
             result = action_input if isinstance(action_input, str) else str(action_input)
             self._publish_task_end(session_id, execution_id, result, task_id, task)
-            if stream:
-                yield {"type": "task_end", "result": result}
         else:
             observation = self._execute_action(action, action_input)
             self._publish_step_end(
@@ -340,8 +339,9 @@ class AsyncPlanReActEngine(AsyncReActCore):
                 "simple"
             )
             self._publish_task_end(session_id, execution_id, final_result, task_id, task)
-            if stream:
-                yield {"type": "task_end", "result": final_result}
+        
+        yield
+        return
 
     async def _analyze_task_and_plan(
         self,
@@ -363,7 +363,9 @@ class AsyncPlanReActEngine(AsyncReActCore):
         Returns:
             分析结果
         """
-        messages = self._build_initial_messages(task, [], task_info, history_context)
+        messages = PromptTemplates.build_task_analysis_messages_with_cache(
+            task, task_info, history_context
+        )
         
         try:
             full_response = ""
@@ -372,7 +374,13 @@ class AsyncPlanReActEngine(AsyncReActCore):
                 if choices:
                     delta = choices[0].get("delta", {})
                     if "content" in delta:
-                        full_response += delta["content"]
+                        content = delta["content"]
+                        if content:  # 只有当 content 不为 None 和空字符串时才处理
+                            full_response += content
+                    if "reasoning_content" in delta:
+                        reasoning = delta["reasoning_content"]
+                        if reasoning:
+                            self._publish_think_stream(session_id, execution_id, -1, reasoning)
 
             import json
             import re

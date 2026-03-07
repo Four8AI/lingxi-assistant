@@ -72,21 +72,42 @@ async function initializeApp() {
       if (formattedSessions && formattedSessions.length > 0) {
         appStore.setCurrentSession(formattedSessions[0].id)
         const history = await window.electronAPI.api.getSessionHistory(formattedSessions[0].id)
+        
         // 转换后端返回的历史记录格式为前端期望的格式
-        const turns = (history || []).map((item: any, index: number) => ({
-          id: `${formattedSessions[0].id}_${index}`,
-          role: item.role,
-          content: item.content,
-          timestamp: item.time || Date.now(),
-          // 保留原始数据中的步骤、思考等信息
-          steps: item.steps || [],
-          thought: item.thought || '',
-          thought_chain: item.thought_chain || null,
-          plan: item.plan || null,
-          executionId: item.executionId || null,
-          status: item.status || null,
-          isThinking: item.isThinking || false
-        }))
+        // 后端返回的是任务列表（按created_at DESC排序），每个任务需要转换成用户消息和助手消息两条记录
+        const turns: any[] = []
+        const historyList = (history || []).reverse() // 反转顺序，使最早的消息在前
+        
+        historyList.forEach((task: any, taskIndex: number) => {
+          // 添加用户消息
+          if (task.user_input) {
+            turns.push({
+              id: `${formattedSessions[0].id}_user_${taskIndex}`,
+              role: 'user',
+              content: task.user_input,
+              timestamp: task.created_at ? new Date(task.created_at).getTime() : Date.now(),
+              time: task.created_at ? new Date(task.created_at).getTime() : Date.now()
+            })
+          }
+          
+          // 添加助手消息
+          turns.push({
+            id: `${formattedSessions[0].id}_assistant_${taskIndex}`,
+            role: 'assistant',
+            content: task.result || '',
+            timestamp: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
+            time: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
+            // 保留原始数据中的步骤、思考等信息
+            steps: task.steps || [],
+            thought: task.thought || '',
+            thought_chain: task.thought_chain || null,
+            plan: task.plan || null,
+            executionId: task.task_id || null,
+            status: task.status || null,
+            isThinking: false
+          })
+        })
+        
         appStore.setTurns(turns)
         
         // 建立 WebSocket 连接
@@ -203,42 +224,43 @@ function setupWebSocketListeners() {
     })
 
     window.electronAPI.ws.onThinkStream((data) => {
-      console.log('[Renderer] Think stream received:', data)
-      // 找到对应的助手消息，将思考内容添加到具体的 step 对象上
       const updatedTurns = [...appStore.turns]
       const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
       if (targetIndex !== -1) {
         const turn = updatedTurns[targetIndex]
-        if (!turn.steps) {
-          turn.steps = []
-        }
-
-        // 获取当前步骤索引，默认为最后一个步骤
-        const stepIndex = data.step_index ?? turn.steps.length - 1
-
-        // 确保步骤对象存在
-        if (!turn.steps[stepIndex]) {
-          turn.steps[stepIndex] = {
-            step_index: stepIndex,  // 使用 step_index 字段
-            description: `步骤 ${stepIndex + 1}`,
-            status: 'running',
-            thought: ''
-          }
-        }
-
-        // 添加思考内容到步骤对象
         const content = data.body?.reasoning_content || data.content || ''
-        if (!turn.steps[stepIndex].thought) {
-          turn.steps[stepIndex].thought = ''
+        const stepIndex = data.step_index ?? data.stepId
+        
+        if (stepIndex === -1) {
+          if (!turn.planThinkingContent) {
+            turn.planThinkingContent = ''
+          }
+          turn.planThinkingContent += content
+          turn.planThinking = true
+        } else {
+          if (!turn.steps) {
+            turn.steps = []
+          }
+
+          const actualStepIndex = stepIndex ?? turn.steps.length - 1
+
+          if (!turn.steps[actualStepIndex]) {
+            turn.steps[actualStepIndex] = {
+              step_index: actualStepIndex,
+              description: `步骤 ${actualStepIndex + 1}`,
+              status: 'running',
+              thought: ''
+            }
+          }
+
+          if (!turn.steps[actualStepIndex].thought) {
+            turn.steps[actualStepIndex].thought = ''
+          }
+          turn.steps[actualStepIndex].thought += content
         }
-        turn.steps[stepIndex].thought += content
 
-        console.log(`[Renderer] Updated step ${stepIndex} thought, length: ${turn.steps[stepIndex].thought.length}`)
         appStore.setTurns(updatedTurns)
-      } else {
-        console.log('[Renderer] No turn found for executionId:', data.executionId)
       }
-
     })
 
     window.electronAPI.ws.onThinkFinal((data) => {
@@ -267,20 +289,27 @@ function setupWebSocketListeners() {
 
     window.electronAPI.ws.onPlanStart((data) => {
       console.log('Plan started:', data)
-    })
-
-    window.electronAPI.ws.onPlanFinal((data) => {
-      console.log('Plan final:', data)
-      // 找到对应的助手消息，添加计划信息
       const updatedTurns = [...appStore.turns]
       const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
       if (targetIndex !== -1) {
         updatedTurns[targetIndex] = {
           ...updatedTurns[targetIndex],
-          plan: {
-            steps: data.plan || [],
-            status: 'completed'
-          }
+          planThinking: true,
+          planThinkingContent: ''
+        }
+        appStore.setTurns(updatedTurns)
+      }
+    })
+
+    window.electronAPI.ws.onPlanFinal((data) => {
+      console.log('Plan final:', data)
+      const updatedTurns = [...appStore.turns]
+      const targetIndex = updatedTurns.findIndex(turn => turn.executionId === data.executionId)
+      if (targetIndex !== -1) {
+        updatedTurns[targetIndex] = {
+          ...updatedTurns[targetIndex],
+          planThinking: false,
+          plan: data.plan || []
         }
         appStore.setTurns(updatedTurns)
       }

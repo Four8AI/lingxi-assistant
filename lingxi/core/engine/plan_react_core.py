@@ -113,38 +113,6 @@ class PlanReActCore(ReActCore):
 
         return self._parse_analysis_response(full_response)
 
-    def _publish_plan_start(self, session_id: str, execution_id: str, task_id: str = None):
-        """发布计划开始事件
-
-        Args:
-            session_id: 会话ID
-            execution_id: 执行ID
-            task_id: 任务ID
-        """
-        global_event_publisher.publish(
-            'plan_start',
-            session_id=session_id,
-            execution_id=execution_id,
-            task_id=task_id
-        )
-
-    def _publish_plan_events(self, session_id: str, execution_id: str, plan: List[str], task_id: str = None):
-        """发布计划相关事件
-
-        Args:
-            session_id: 会话ID
-            execution_id: 执行ID
-            plan: 计划步骤列表
-            task_id: 任务ID
-        """
-        global_event_publisher.publish(
-            'plan_final',
-            session_id=session_id,
-            execution_id=execution_id,
-            task_id=task_id,
-            plan=[{"step": i+1, "description": step} for i, step in enumerate(plan)]
-        )
-
     def _create_initial_checkpoint(self, task: str, plan: List[str], task_id: str = None) -> Dict[str, Any]:
         """创建初始检查点
 
@@ -249,12 +217,10 @@ class PlanReActCore(ReActCore):
                 # 父类 _execute_task_stream 现在返回生成器
                 final_result = None
                 for chunk in super()._execute_task_stream(parent_context):
-                    # 转发所有流式事件
                     if stream:
                         yield chunk
                     
-                    # 捕获最终结果
-                    if chunk.get("type") == "task_end":
+                    if chunk.get("type") == "task_finish":
                         final_result = chunk.get("result", "任务执行完成")
 
                 # 更新检查点
@@ -303,7 +269,7 @@ class PlanReActCore(ReActCore):
             self.logger.warning("检查点显示任务已完成，无需恢复")
             result = checkpoint.get("result", "任务已完成")
             self._publish_task_end(session_id, execution_id, result, task_id, task)
-            yield {"type": "task_end", "result": result}
+            yield {"type": "task_finish", "result": result}
             return
         
         # 更新检查点状态
@@ -341,12 +307,10 @@ class PlanReActCore(ReActCore):
             # 父类 ReActCore 会根据提示词中的计划自行按步骤执行
             final_result = None
             for chunk in super()._execute_task_stream(parent_context):
-                # 转发所有流式事件
                 if stream:
                     yield chunk
                 
-                # 捕获最终结果
-                if chunk.get("type") == "task_end":
+                if chunk.get("type") == "task_finish":
                     final_result = chunk.get("result", "任务执行完成")
 
             # 更新检查点
@@ -497,7 +461,7 @@ class PlanReActCore(ReActCore):
             result = action_input if isinstance(action_input, str) else str(action_input)
             self._publish_task_end(session_id, execution_id, result, task_id, task)
             if stream:
-                yield {"type": "task_end", "result": result}
+                yield {"type": "task_finish", "result": result}
         else:
             observation = self._execute_action(action, action_input)
             self._publish_step_end(
@@ -507,4 +471,4 @@ class PlanReActCore(ReActCore):
             final_result = self._generate_final_response(task, [{"thought": thought, "action": action, "observation": observation}], "simple")
             self._publish_task_end(session_id, execution_id, final_result, task_id, task)
             if stream:
-                yield {"type": "task_end", "result": final_result}
+                yield {"type": "task_finish", "result": final_result}

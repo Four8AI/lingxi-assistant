@@ -210,7 +210,7 @@ async def clear_session_history(session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="助手服务未初始化")
 
     try:
-        assistant.session_manager.clear_session(session_id)
+        assistant.session_manager.clear_session_history(session_id)
         return {"success": True, "message": f"会话历史已清空：{session_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清空会话历史失败：{str(e)}")

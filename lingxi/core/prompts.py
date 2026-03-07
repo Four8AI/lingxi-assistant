@@ -319,7 +319,7 @@ Action Input: {{"file_path": "test.txt"}}
         if system_info is None:
             system_info = PromptTemplates.get_system_info()
 
-        system_prompt = f"""你是智能任务分析器，需要分析用户任务并输出处理方案。
+        system_prompt = f"""你是智能任务分析器，需要分析用户任务并输出处理方案，处理方案要精炼。
 
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
@@ -327,6 +327,7 @@ Shell类型: {system_info['shell_type']}
 
 可用工具:
 {skills_list}
+
 finish(answer) - 完成任务并返回答案
 
 请严格按照以下JSON格式输出，不要包含任何其他文字：
@@ -354,7 +355,7 @@ finish(answer) - 完成任务并返回答案
 - 如果是simple任务，必须填写next_action字段，plan字段可以为空数组
 - 如果是complex任务，必须填写plan字段，next_action可以为空
 - 如果是问候类或可直接回答的问题，level设为simple，action设为finish，action_input为回答内容
-- 如果是complex任务，plan最多{max_plan_steps}个步骤
+- 如果是complex任务，plan最多{max_plan_steps}个步骤，每个步骤描述要精炼，优先使用已有的技能
 - 每个步骤应该是独立可执行的子任务
 - 必须返回有效的JSON格式"""
 

@@ -53,34 +53,29 @@ class SessionStoreSubscriber:
             **kwargs: 其他参数
         """
         task_id = kwargs.get('task_id')
-        task_input = kwargs.get('task_input', '')
+        user_input = kwargs.get('user_input', '')
         self.logger.info(f"收到 task_start 事件：session={session_id}, task_id={task_id}")
         if not task_id:
             self.logger.warning(f"处理 task_start 事件时缺少 task_id: {session_id}, kwargs={kwargs}")
             return
             
         if self.sessionManage:
-            # 检查会话是否存在，不存在则创建
             session_info = self.sessionManage.get_session_info(session_id)
             if not session_info:
                 self.logger.info(f"会话不存在，创建新会话：session={session_id}")
                 self.sessionManage.create_session_by_id(session_id=session_id)
-            else:
-                self.logger.debug(f"会话已存在：session={session_id}")
             
-            # 检查任务是否已存在，避免重复创建
             existing_task = self.sessionManage.get_task(session_id, task_id)
             if existing_task:
                 self.logger.debug(f"任务已存在，跳过创建：session={session_id}, task={task_id}")
                 return
             
-            # 创建任务
             self.logger.info(f"创建任务：session={session_id}, task={task_id}")
             self.sessionManage.create_task(
                 session_id=session_id,
                 task_id=task_id,
                 task_type='task',
-                user_input=task_input
+                user_input=user_input
             )
             self.logger.info(f"任务创建成功")
         else:

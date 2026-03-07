@@ -45,9 +45,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { computed, ref } from 'vue'
 import type { Step } from '../../types'
 
 interface Props {

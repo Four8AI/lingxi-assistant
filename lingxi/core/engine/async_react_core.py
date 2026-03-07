@@ -142,50 +142,45 @@ class AsyncReActCore(BaseEngine):
         """
         try:
             self.logger.debug(f"开始流式 LLM 调用")
-            full_response = ""  # 收集完整响应
+            full_response = ""
             last_thought = ""
+            last_usage = None
             self.logger.debug(f"发往 LLM 的消息: {messages}")
             async for chunk in self.async_llm_client.stream_chat(messages, task_level):
+                if "usage" in chunk:
+                    last_usage = chunk["usage"]
+                
                 choices = chunk.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
                     
                     if "content" in delta:
-                        # 如果没有 thinking_delta，使用原始 content
                         content = delta["content"]
-                        full_response += content  # 收集内容
-                        from lingxi.utils.json_parser import extract_partial_json_field
-                        thought = extract_partial_json_field(full_response, "thought")
-                        if thought and thought != last_thought:
-                            # 只输出增量的thought内容
-                            incremental_thought = thought[len(last_thought):] if last_thought else thought
+                        if content:
+                            full_response += content
+                            #from lingxi.utils.json_parser import extract_partial_json_field
+                            #thought = extract_partial_json_field(full_response, "thought")
+                            #if thought and thought != last_thought:
+                                #last_thought = thought
+                    
+                    if "reasoning_content" in delta:
+                        reasoning = delta["reasoning_content"]
+                        if reasoning:
                             yield {
                                 "type": "thought_chunk",
-                                "content": incremental_thought
+                                "content": reasoning
                             }
-                            last_thought = thought
-                      
-                    
-                    if "reasoning_content" in delta and delta["reasoning_content"]:
-                        reasoning = delta["reasoning_content"]
-                        full_response += reasoning  # 收集推理内容
-                        self.logger.debug(f"推理块：{repr(reasoning[:50]) if len(reasoning) > 50 else repr(reasoning)}")
-                        yield {
-                            "type": "reasoning_chunk",
-                            "content": reasoning
-                        }
 
-            # 收集 usage 信息
             self.logger.debug(f"准备发送 complete chunk，完整响应长度：{len(full_response)}")
             self.logger.debug(f"接收到LLM响应：{full_response if full_response else '空'}")
             
-            if self.async_llm_client.last_usage:
-                self.logger.debug(f"Token 使用：{self.async_llm_client.last_usage}")
+            if last_usage:
+                self.logger.debug(f"Token 使用：{last_usage}")
             
             yield {
                 "type": "complete",
-                "response": full_response,  # 返回完整响应
-                "usage": self.async_llm_client.last_usage
+                "response": full_response,
+                "usage": last_usage
             }
 
         except Exception as e:
@@ -206,47 +201,11 @@ class AsyncReActCore(BaseEngine):
             if json_match:
                 json_str = json_match.group()
                 parsed = json.loads(json_str)
-                
-                if "thought" in parsed and "action" in parsed:
-                    parsed["description"] = parsed.get("thought", "")
-                    return parsed
+                return parsed
         except Exception as e:
-            self.logger.debug(f"JSON 格式解析失败：{e}，尝试文本格式")
+            self.logger.error(f"JSON 格式解析失败：{e}，尝试文本格式")
+            raise e
         
-        # 尝试 2: 解析文本格式 (ReAct 标准格式)
-        # Thought: ...\nAction: ...\nAction Input: {...}
-        try:
-            thought_match = re.search(r'Thought:\s*(.*?)(?=\nAction:|$)', response, re.DOTALL)
-            action_match = re.search(r'Action:\s*(\w+)', response)
-            action_input_match = re.search(r'Action Input:\s*(\{.*?\})', response, re.DOTALL)
-            
-            if thought_match and action_match:
-                thought = thought_match.group(1).strip()
-                action = action_match.group(1).strip()
-                
-                # 提取 action_input（JSON 格式）
-                action_input = {}
-                if action_input_match:
-                    try:
-                        action_input_str = action_input_match.group(1)
-                        # 替换单引号为双引号
-                        action_input_str = action_input_str.replace("'", '"')
-                        # 处理路径中的反斜杠转义问题
-                        action_input_str = re.sub(r'\\\\+', r'\\', action_input_str)
-                        action_input = json.loads(action_input_str)
-                    except Exception as e:
-                        self.logger.debug(f"解析 Action Input 失败：{e}")
-                
-                return {
-                    "thought": thought,
-                    "action": action,
-                    "action_input": action_input,
-                    "description": thought
-                }
-        except Exception as e:
-            self.logger.warning(f"文本格式解析失败：{e}")
-        
-        return None
 
     def _execute_action(self, action: str, action_input: Any) -> str:
         """执行行动（同步，在线程池中调用）"""
@@ -397,14 +356,15 @@ class AsyncReActCore(BaseEngine):
 
             if res and res.get("action") == "finish":
                 self.logger.debug("检测到 finish 动作，结束任务执行")
-                self._publish_task_end(session_id, execution_id, res.get("action_input", ""), task_id)
+                final_answer = res.get("action_input", "")
+                self._publish_task_end(session_id, execution_id, final_answer, task_id)
                 
                 if task_id:
                     self.session_manager.update_task_tokens(task_id, total_input_tokens, total_output_tokens)
                     self.session_manager.update_session_tokens(session_id, total_input_tokens, total_output_tokens)
                     self.logger.debug(f"任务 Token 总计：input={total_input_tokens}, output={total_output_tokens}")
                 
-                yield {"type": "task_end", "result": res.get("action_input", "")}
+                yield {"type": "task_finish", "result": final_answer}
                 return
 
     async def process(
@@ -427,6 +387,6 @@ class AsyncReActCore(BaseEngine):
             # 非流式模式：收集所有结果
             result = None
             async for chunk in self._execute_task_stream(context):
-                if chunk.get("type") == "task_end":
+                if chunk.get("type") == "task_finish":
                     result = chunk.get("result", "")
             return result

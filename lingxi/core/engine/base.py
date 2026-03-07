@@ -425,6 +425,38 @@ class BaseEngine:
             error=error
         )
 
+    def _publish_plan_start(self, session_id: str, execution_id: str, task_id: str = None):
+        """发布计划开始事件
+
+        Args:
+            session_id: 会话ID
+            execution_id: 执行ID
+            task_id: 任务ID
+        """
+        global_event_publisher.publish(
+            'plan_start',
+            session_id=session_id,
+            execution_id=execution_id,
+            task_id=task_id
+        )
+
+    def _publish_plan_events(self, session_id: str, execution_id: str, plan: List[str], task_id: str = None):
+        """发布计划相关事件
+
+        Args:
+            session_id: 会话ID
+            execution_id: 执行ID
+            plan: 计划步骤列表
+            task_id: 任务ID
+        """
+        global_event_publisher.publish(
+            'plan_final',
+            session_id=session_id,
+            execution_id=execution_id,
+            task_id=task_id,
+            plan=[{"step": i+1, "description": step} for i, step in enumerate(plan)]
+        )
+
     def handle_confirmation_response(self, request_id: str, confirmed: bool, reason: Optional[str] = None) -> bool:
         """处理客户端确认响应（V4.0新增）
 

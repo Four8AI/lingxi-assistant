@@ -237,7 +237,7 @@ finish(answer) - 完成任务并返回答案
                     self.session_manager.update_session_tokens(session_id, total_input_tokens, total_output_tokens)
                     self.logger.debug(f"任务 Token 总计: input={total_input_tokens}, output={total_output_tokens}")
                 
-                yield {"type": "task_end", "result": res.get("action_input", "")}
+                yield {"type": "task_finish", "result": res.get("action_input", "")}
                 return    
       
 

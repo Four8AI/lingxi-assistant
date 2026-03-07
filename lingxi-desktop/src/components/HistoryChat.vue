@@ -129,58 +129,52 @@ async function handleSelectSession(sessionId: string) {
     const sessionInfo = await window.electronAPI.api.getSessionInfo(sessionId)
     console.log('Received sessionInfo:', sessionInfo)
     
-    const turns = []
+    const turns: any[] = []
     if (sessionInfo.task_list && Array.isArray(sessionInfo.task_list)) {
-      sessionInfo.task_list.forEach((task: any, taskIndex: number) => {
+      // 反转任务列表顺序，使最早的任务在前
+      const taskList = sessionInfo.task_list.reverse()
+      
+      taskList.forEach((task: any, taskIndex: number) => {
+        // 添加用户消息
         if (task.user_input) {
           turns.push({
             id: `${sessionId}_${taskIndex}_user`,
             role: 'user',
             content: task.user_input,
             time: task.created_at || Date.now(),
-            timestamp: task.created_at || Date.now(),
-            steps: [],
-            plan: null,
-            status: null,
-            isStreaming: false
+            timestamp: task.created_at || Date.now()
           })
         }
         
-        if (task.result) {
-          turns.push({
-            id: `${sessionId}_${taskIndex}_assistant`,
-            role: 'assistant',
-            content: task.result,
-            time: task.created_at ? new Date(task.created_at).getTime() + 1000 : Date.now(),
-            timestamp: task.created_at ? new Date(task.created_at).getTime() + 1000 : Date.now(),
-            steps: task.steps || [],
-            plan: task.plan || null,
-            status: task.status || null,
-            isStreaming: false
-          })
-        }
+        // 添加助手消息
+        turns.push({
+          id: `${sessionId}_${taskIndex}_assistant`,
+          role: 'assistant',
+          content: task.result || '',
+          time: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
+          timestamp: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
+          steps: task.steps || [],
+          plan: task.plan || null,
+          executionId: task.task_id || null,
+          status: task.status || null,
+          isStreaming: false
+        })
       })
     }
     appStore.setTurns(turns)
   } catch (error: any) {
     console.error('Failed to load session info:', error)
     if (error?.response?.status === 404 || error?.message?.includes('不存在')) {
-      console.log('Session does not exist, creating new session')
-      try {
-        const sessionData = await window.electronAPI.api.createSession()
-        const session = {
-          id: sessionData.session_id,
-          name: sessionData.first_message || '新会话',
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        }
-        appStore.setSessions([...sessions.value, session])
-        appStore.setCurrentSession(session.id)
-        appStore.setTurns([])
-      } catch (createError) {
-        console.error('Failed to create session:', createError)
-        appStore.setTurns([])
+      console.log('Session does not exist, removing from list')
+      const updatedSessions = sessions.value.filter(s => s.id !== sessionId)
+      appStore.setSessions(updatedSessions)
+      
+      if (updatedSessions.length > 0) {
+        appStore.setCurrentSession(updatedSessions[0].id)
+      } else {
+        appStore.setCurrentSession(null)
       }
+      appStore.setTurns([])
     } else {
       appStore.setTurns([])
     }

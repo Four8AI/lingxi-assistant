@@ -21,6 +21,16 @@
           </span>
         </div>
 
+        <div v-if="turn.planThinking" class="message-plan-thinking">
+          <div class="plan-thinking-header">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span class="plan-thinking-label">正在制定执行计划...</span>
+          </div>
+          <div v-if="turn.planThinkingContent" class="plan-thinking-content">
+            {{ turn.planThinkingContent }}
+          </div>
+        </div>
+
         <div v-if="getPlanSteps(turn.plan).length > 0" class="message-plan">
           <div class="plan-header" @click="togglePlanExpand(turn.id)">
             <span class="plan-label">执行计划：</span>
@@ -175,17 +185,15 @@ function renderMarkdown(content: any): string {
   if (typeof content === 'object' && content !== null) {
     // 提取最终结果部分
     if (content.final_result) {
-      console.log('Rendering final_result:', content.final_result)
-      return marked.parse('# 最终结果\n\n' + content.final_result)
+      return marked.parse(content.final_result)
     } else if (content.result) {
-      console.log('Rendering result:', content.result)
-      return marked.parse('# 最终结果\n\n' + content.result)
+      return marked.parse(content.result)
     } else if (content.content) {
       // 如果JSON中包含content字段，递归处理
       return renderMarkdown(content.content)
     } else {
       // 如果没有找到最终结果，显示提示信息
-      return marked.parse('# 最终结果\n\n*暂无最终结果*')
+      return marked.parse('*暂无最终结果*')
     }
   }
   
@@ -199,9 +207,9 @@ function renderMarkdown(content: any): string {
       const finalResult = parts[1].trim()
       // 如果最终结果部分为空，显示提示信息
       if (!finalResult) {
-        return marked.parse('# 最终结果\n\n*暂无最终结果*')
+        return marked.parse('*暂无最终结果*')
       }
-      return marked.parse('# 最终结果' + parts[1])
+      return marked.parse(finalResult)
     }
   }
   
@@ -339,24 +347,32 @@ function togglePlanExpand(turnId: string) {
 }
 
 function isPlanExpanded(turnId: string): boolean {
-  return expandedPlans.value[turnId] || false
+  if (expandedPlans.value[turnId] !== undefined) {
+    return expandedPlans.value[turnId]
+  }
+  return true
 }
 
 // 监听turns变化，处理步骤的自动折叠逻辑
 watch(turns, (newTurns) => {
   newTurns.forEach(turn => {
+    if (turn.plan && getPlanSteps(turn.plan).length > 0) {
+      if (expandedPlans.value[turn.id] === undefined) {
+        expandedPlans.value[turn.id] = true
+      }
+    }
+    
     if (turn.steps && turn.steps.length > 0) {
-      // 找到当前正在运行的步骤
       const runningStepIndex = turn.steps.findIndex(step => step.status === 'running')
       
       if (runningStepIndex !== -1) {
-        // 自动展开当前运行的步骤
+        expandedPlans.value[turn.id] = false
+        
         if (!expandedSteps.value[turn.id]) {
           expandedSteps.value[turn.id] = {}
         }
         expandedSteps.value[turn.id][runningStepIndex] = true
         
-        // 自动折叠其他步骤，添加100毫秒延时
         setTimeout(() => {
           turn.steps.forEach((step, index) => {
             if (index !== runningStepIndex) {
@@ -365,7 +381,6 @@ watch(turns, (newTurns) => {
           })
         }, 100)
       } else if (turn.status === 'completed' && turn.steps.length > 0) {
-        // 任务完成时，折叠所有步骤，添加100毫秒延时
         setTimeout(() => {
           if (!expandedSteps.value[turn.id]) {
             expandedSteps.value[turn.id] = {}
@@ -490,6 +505,43 @@ watch(turns, (newTurns) => {
     line-height: 1.4;
     color: #333;
     font-size: 13px;
+  }
+}
+
+.message-plan-thinking {
+  background-color: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+
+  .plan-thinking-header {
+    display: flex;
+    align-items: center;
+    color: #fa8c16;
+
+    .is-loading {
+      margin-right: 8px;
+      animation: rotate 1s linear infinite;
+    }
+
+    .plan-thinking-label {
+      font-weight: 600;
+    }
+  }
+
+  .plan-thinking-content {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: rgba(250, 140, 22, 0.1);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #666;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
   }
 }
 
@@ -719,6 +771,23 @@ watch(turns, (newTurns) => {
       color: #1890ff;
       border-bottom-color: #d6e4ff;
     }
+  }
+}
+
+.message-text-user {
+  background-color: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  display: inline-block;
+  max-width: 100%;
+  text-align: left;
+  
+  ::v-deep(p) {
+    margin: 0;
+    line-height: 1.6;
+    color: #333;
   }
 }
 

@@ -917,15 +917,23 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        cursor.execute("SELECT task_id FROM tasks WHERE session_id = ?", (session_id,))
+        task_ids = [row[0] for row in cursor.fetchall()]
+        
+        for task_id in task_ids:
+            cursor.execute("DELETE FROM steps WHERE task_id = ?", (task_id,))
+        
+        cursor.execute("DELETE FROM tasks WHERE session_id = ?", (session_id,))
+        
         cursor.execute("""
-            UPDATE sessions SET current_task_id = NULL, total_tokens = 0, updated_at = CURRENT_TIMESTAMP
+            UPDATE sessions SET current_task_id = NULL, total_tokens = 0, checkpoint_json = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE session_id = ?
         """, (session_id,))
         
         conn.commit()
         conn.close()
         
-        self.logger.debug(f"会话历史已清空，session_id: {session_id}")
+        self.logger.debug(f"会话历史已清空，session_id: {session_id}，删除了 {len(task_ids)} 个任务")
 
     def get_checkpoint_status(self, session_id: str) -> Dict[str, Any]:
         """获取检查点状态信息
