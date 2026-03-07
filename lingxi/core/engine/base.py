@@ -385,25 +385,25 @@ class BaseEngine:
             description=description
         )
 
-    def _publish_task_end(self, session_id: str, execution_id: str, result: str, task_id: str = None, task: str = None):
+    def _publish_task_end(self, result: str, context: TaskContext):
         """发布任务结束事件
 
         Args:
-            session_id: 会话 ID
-            execution_id: 执行 ID
             result: 结果
-            task_id: 任务 ID
-            task: 任务文本
+            context: 任务上下文
         """
         global_event_publisher.publish(
             'task_end',
-            session_id=session_id,
-            execution_id=execution_id,
-            task_id=task_id,
-            task_input=task,
-            result=result
+            session_id=context.session_id,
+            execution_id=context.execution_id,
+            task_id=context.task_id,
+            task_input=context.user_input,
+            result=result,
+            task_level=context.get_task_level(),
+            input_tokens=context.input_tokens,
+            output_tokens=context.output_tokens
         )
-        # 返回 task_end 事件
+        
         return {
             "type": "task_end",
             "result": result
@@ -425,19 +425,21 @@ class BaseEngine:
             error=error
         )
 
-    def _publish_plan_start(self, session_id: str, execution_id: str, task_id: str = None):
+    def _publish_plan_start(self, session_id: str, execution_id: str, task_id: str = None, task_level: str = "none"):
         """发布计划开始事件
 
         Args:
             session_id: 会话ID
             execution_id: 执行ID
             task_id: 任务ID
+            task_level: 任务级别
         """
         global_event_publisher.publish(
             'plan_start',
             session_id=session_id,
             execution_id=execution_id,
-            task_id=task_id
+            task_id=task_id,
+            task_level=task_level
         )
 
     def _publish_plan_events(self, session_id: str, execution_id: str, plan: List[str], task_id: str = None):
@@ -639,21 +641,23 @@ class BaseEngine:
                 return error_generator()
             return self._generate_error_response(task, -1, f"{error_message}\n堆栈信息:\n{error_trace}")
 
-    def _handle_task_completion(self, checkpoint: Dict[str, Any], session_id: str, execution_id: str, 
-                              task: str, all_results: List[Dict[str, Any]], task_level: str) -> Generator[Dict[str, Any], None, None]:
+    def _handle_task_completion(self, checkpoint: Dict[str, Any], all_results: List[Dict[str, Any]], 
+                              context: TaskContext) -> Generator[Dict[str, Any], None, None]:
         """处理任务完成
 
         Args:
             checkpoint: 检查点
-            session_id: 会话ID
-            execution_id: 执行ID
-            task: 任务文本
             all_results: 所有结果
-            task_level: 任务级别
+            context: 任务上下文
 
         Returns:
             流式响应生成器
         """
+        session_id = context.session_id
+        execution_id = context.execution_id
+        task = context.user_input
+        task_level = context.get_task_level()
+        
         checkpoint["execution_status"] = "completed"
         checkpoint["error_info"] = None
         if hasattr(self, "_save_plan_checkpoint"):
@@ -672,7 +676,7 @@ class BaseEngine:
             # 否则调用模型生成最终响应
             final_response = self._generate_final_response(task, all_results, task_level)
 
-        self._publish_task_end(session_id, execution_id, final_response)
+        self._publish_task_end(final_response, context)
 
     def _handle_step_failure(self, step_result: Dict[str, Any], checkpoint: Dict[str, Any],
                            session_id: str, execution_id: str, step_idx: int, task: str):
@@ -712,5 +716,6 @@ class BaseEngine:
                 execution_id=execution_id,
                 task_id=task_id,
                 task_info=task_info,
-                user_input=task
+                user_input=task,
+                task_level=task_info.get("level", "none")
         )

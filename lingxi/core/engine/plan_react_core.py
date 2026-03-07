@@ -268,7 +268,7 @@ class PlanReActCore(ReActCore):
         if current_step_idx >= len(plan):
             self.logger.warning("检查点显示任务已完成，无需恢复")
             result = checkpoint.get("result", "任务已完成")
-            self._publish_task_end(session_id, execution_id, result, task_id, task)
+            self._publish_task_end(result, context)
             yield {"type": "task_finish", "result": result}
             return
         
@@ -418,7 +418,7 @@ class PlanReActCore(ReActCore):
         elif plan:
             self.logger.debug("复杂任务，执行计划")
 
-            self._publish_plan_start(session_id, execution_id, task_id)
+            self._publish_plan_start(session_id, execution_id, task_id, analyzed_level)
 
             plan_descriptions = [step.get("description", str(step)) for step in plan]
 
@@ -459,7 +459,7 @@ class PlanReActCore(ReActCore):
 
         if action == "finish":
             result = action_input if isinstance(action_input, str) else str(action_input)
-            self._publish_task_end(session_id, execution_id, result, task_id, task)
+            self._publish_task_end(result, context)
             if stream:
                 yield {"type": "task_finish", "result": result}
         else:
@@ -469,6 +469,6 @@ class PlanReActCore(ReActCore):
                 "completed", None, observation, thought, action, task_id
             )
             final_result = self._generate_final_response(task, [{"thought": thought, "action": action, "observation": observation}], "simple")
-            self._publish_task_end(session_id, execution_id, final_result, task_id, task)
+            self._publish_task_end(final_result, context)
             if stream:
                 yield {"type": "task_finish", "result": final_result}

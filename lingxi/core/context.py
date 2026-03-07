@@ -13,6 +13,8 @@ class TaskContext:
     stream: bool = False
     task_id: Optional[str] = None
     execution_id: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
     
     def __post_init__(self):
         if self.session_history is None:
@@ -32,6 +34,20 @@ class TaskContext:
         """获取任务类型"""
         return self.task_info.get("task_type", "unknown")
     
+    def add_tokens(self, input_tokens: int, output_tokens: int) -> None:
+        """累加 token 使用量
+
+        Args:
+            input_tokens: 输入 token 数
+            output_tokens: 输出 token 数
+        """
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+    
+    def get_total_tokens(self) -> int:
+        """获取总 token 数"""
+        return self.input_tokens + self.output_tokens
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -41,7 +57,9 @@ class TaskContext:
             "session_history": self.session_history,
             "stream": self.stream,
             "task_id": self.task_id,
-            "execution_id": self.execution_id
+            "execution_id": self.execution_id,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens
         }
     
     @classmethod
@@ -54,5 +72,7 @@ class TaskContext:
             session_history=data.get("session_history", []),
             stream=data.get("stream", False),
             task_id=data.get("task_id"),
-            execution_id=data.get("execution_id")
+            execution_id=data.get("execution_id"),
+            input_tokens=data.get("input_tokens", 0),
+            output_tokens=data.get("output_tokens", 0)
         )

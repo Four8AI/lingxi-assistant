@@ -21,14 +21,17 @@ This skill provides comprehensive Excel file operations including reading, analy
 Read an Excel file and return its structure and content.
 
 **Parameters:**
+
 - `operation` (required): "read"
 - `file_path` (required): Path to the Excel file
 
 **Returns:**
+
 - Success: File path, row count, column count, column names, and first 5 rows
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(operation="read", file_path="人员信息.xlsx")
 ```
@@ -38,14 +41,17 @@ xlsx(operation="read", file_path="人员信息.xlsx")
 Analyze an Excel file and return detailed statistics.
 
 **Parameters:**
+
 - `operation` (required): "analyze"
 - `file_path` (required): Path to the Excel file
 
 **Returns:**
+
 - Success: Data shape, data types, and statistical information
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(operation="analyze", file_path="人员信息.xlsx")
 ```
@@ -55,16 +61,19 @@ xlsx(operation="analyze", file_path="人员信息.xlsx")
 Merge two Excel files based on common columns.
 
 **Parameters:**
+
 - `operation` (required): "merge"
 - `file_path1` (required): Path to the first Excel file
 - `file_path2` (required): Path to the second Excel file
 - `output_file` (optional): Path for the merged output file (default: "merged.xlsx")
 
 **Returns:**
+
 - Success: Merge result, file information, and output file details
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(
     operation="merge",
@@ -79,15 +88,18 @@ xlsx(
 Create a new Excel file from content.
 
 **Parameters:**
+
 - `operation` (required): "create"
 - `output_file` (optional): Path for the output file (default: "output.xlsx")
 - `content` (required): Content to write (CSV format)
 
 **Returns:**
+
 - Success: Creation result and file information
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(
     operation="create",
@@ -101,14 +113,17 @@ xlsx(
 Edit an existing Excel file.
 
 **Parameters:**
+
 - `operation` (required): "edit"
 - `file_path` (required): Path to the Excel file
 
 **Returns:**
+
 - Success: Edit result and file information
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(operation="edit", file_path="人员信息.xlsx")
 ```
@@ -118,16 +133,19 @@ xlsx(operation="edit", file_path="人员信息.xlsx")
 Sort an Excel file by a specified column.
 
 **Parameters:**
+
 - `operation` (required): "sort"
 - `file_path` (required): Path to the Excel file
 - `column` (required): Column name to sort by
 - `ascending` (optional): Sort order, true for ascending, false for descending (default: true)
 
 **Returns:**
+
 - Success: Sort result, original file, sort column, sort order, and output file details
 - Error: Error message
 
 **Example:**
+
 ```python
 xlsx(
     operation="sort",
@@ -143,6 +161,7 @@ xlsx(
 - openpyxl
 
 Install dependencies:
+
 ```bash
 pip install pandas openpyxl
 ```
@@ -150,6 +169,7 @@ pip install pandas openpyxl
 ## Error Handling
 
 The skill will return clear error messages for common issues:
+
 - Missing required parameters
 - File not found
 - Invalid operation type

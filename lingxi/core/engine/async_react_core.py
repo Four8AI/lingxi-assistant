@@ -330,9 +330,6 @@ class AsyncReActCore(BaseEngine):
         history_context = self._build_history_context(history)
         messages = self._build_initial_messages(user_input, task_plan, task_info, history_context)
         steps = []
-        
-        total_input_tokens = 0
-        total_output_tokens = 0
 
         for step in range(self.max_steps):
             self.logger.debug(f"步骤 {step + 1}/{self.max_steps}")
@@ -347,8 +344,7 @@ class AsyncReActCore(BaseEngine):
                 if usage:
                     input_tokens = getattr(usage, "prompt_tokens", 0)
                     output_tokens = getattr(usage, "completion_tokens", 0)
-                    total_input_tokens += input_tokens
-                    total_output_tokens += output_tokens
+                    context.add_tokens(input_tokens, output_tokens)
                     self.logger.debug(f"步骤 {step + 1} Token 使用：input={input_tokens}, output={output_tokens}")
             
             res = step_result.get("parsed") if step_result else None
@@ -357,12 +353,7 @@ class AsyncReActCore(BaseEngine):
             if res and res.get("action") == "finish":
                 self.logger.debug("检测到 finish 动作，结束任务执行")
                 final_answer = res.get("action_input", "")
-                self._publish_task_end(session_id, execution_id, final_answer, task_id)
-                
-                if task_id:
-                    self.session_manager.update_task_tokens(task_id, total_input_tokens, total_output_tokens)
-                    self.session_manager.update_session_tokens(session_id, total_input_tokens, total_output_tokens)
-                    self.logger.debug(f"任务 Token 总计：input={total_input_tokens}, output={total_output_tokens}")
+                self._publish_task_end(final_answer, context)
                 
                 yield {"type": "task_finish", "result": final_answer}
                 return

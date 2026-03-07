@@ -131,10 +131,7 @@ async function handleSelectSession(sessionId: string) {
     
     const turns: any[] = []
     if (sessionInfo.task_list && Array.isArray(sessionInfo.task_list)) {
-      // 反转任务列表顺序，使最早的任务在前
-      const taskList = sessionInfo.task_list.reverse()
-      
-      taskList.forEach((task: any, taskIndex: number) => {
+      sessionInfo.task_list.forEach((task: any, taskIndex: number) => {
         // 添加用户消息
         if (task.user_input) {
           turns.push({

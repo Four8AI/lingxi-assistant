@@ -54,6 +54,7 @@ class SessionStoreSubscriber:
         """
         task_id = kwargs.get('task_id')
         user_input = kwargs.get('user_input', '')
+        task_level = kwargs.get('task_level', 'none')
         self.logger.info(f"收到 task_start 事件：session={session_id}, task_id={task_id}")
         if not task_id:
             self.logger.warning(f"处理 task_start 事件时缺少 task_id: {session_id}, kwargs={kwargs}")
@@ -75,7 +76,8 @@ class SessionStoreSubscriber:
                 session_id=session_id,
                 task_id=task_id,
                 task_type='task',
-                user_input=user_input
+                user_input=user_input,
+                task_level=task_level
             )
             self.logger.info(f"任务创建成功")
         else:
@@ -91,6 +93,7 @@ class SessionStoreSubscriber:
         """
         task_id = kwargs.get('task_id')
         task_input = kwargs.get('task_info', {}).get('description', '')
+        task_level = kwargs.get('task_level', 'none')
         self.logger.info(f"收到 plan_start 事件：session={session_id}, task_id={task_id}")
         if not task_id:
             self.logger.warning(f"处理 plan_start 事件时缺少 task_id: {session_id}, kwargs={kwargs}")
@@ -117,7 +120,8 @@ class SessionStoreSubscriber:
                 session_id=session_id,
                 task_id=task_id,
                 task_type='plan',
-                user_input=task_input
+                user_input=task_input,
+                task_level=task_level
             )
             self.logger.info(f"任务创建成功")
         else:
@@ -217,7 +221,6 @@ class SessionStoreSubscriber:
             self.logger.warning(f"处理 task_end 事件时缺少 task_id: {session_id}, kwargs={kwargs}")
             return
         
-        # 如果 result 是字典，转换为 JSON 字符串
         if isinstance(result, dict):
             result = json.dumps(result, ensure_ascii=False)
             
@@ -230,6 +233,14 @@ class SessionStoreSubscriber:
                 user_input=kwargs.get('task_input', ''),
                 status='completed'
             )
+            
+            input_tokens = kwargs.get('input_tokens', 0)
+            output_tokens = kwargs.get('output_tokens', 0)
+            if input_tokens or output_tokens:
+                self.sessionManage.update_task_tokens(task_id, input_tokens, output_tokens)
+                self.sessionManage.update_session_tokens(session_id, input_tokens, output_tokens)
+                self.logger.debug(f"任务 Token 总计：input={input_tokens}, output={output_tokens}")
+            
             self.logger.info(f"任务结果保存成功")
         else:
             self.logger.warning("sessionManage 未初始化")

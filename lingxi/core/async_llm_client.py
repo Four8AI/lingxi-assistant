@@ -96,7 +96,7 @@ class AsyncLLMClient:
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "stream": True,
-            "stream_options": {"include_usage": True}
+            "stream_options": {"include_usage": True,"include_thought": kwargs.get("enable_thinking", False)}
         }
 
         # 添加额外参数

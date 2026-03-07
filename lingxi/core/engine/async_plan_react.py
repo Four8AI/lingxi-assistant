@@ -180,7 +180,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         if current_step_idx >= len(plan):
             self.logger.warning("检查点显示任务已完成，无需恢复")
             result = checkpoint.get("result", "任务已完成")
-            self._publish_task_end(session_id, execution_id, result, task_id, task)
+            self._publish_task_end(result, context)
             yield {"type": "task_finish", "result": result}
             return
         
@@ -255,6 +255,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         execution_id = context.execution_id
         stream = context.stream
         task_id = context.task_id
+        plan_descriptions = []
         
         task_level = task_info.get("level", "simple")
         history_context = self._build_history_context(history)
@@ -272,28 +273,35 @@ class AsyncPlanReActEngine(AsyncReActCore):
             return
         
         analyzed_level = analysis.get("level", "simple")
+        context.task_info["level"] = analyzed_level
         next_action = analysis.get("next_action")
         plan = analysis.get("plan", [])
-
+        self._publish_plan_start(session_id, execution_id, task_id, analyzed_level)
         self.logger.debug(f"分析结果：level={analyzed_level}, has_next_action={next_action is not None}, plan_steps={len(plan)}")
 
-        if analyzed_level == "simple" and next_action:
-            self.logger.debug("简单任务，直接执行 next_action")
+        if analyzed_level == "simple":
+            if next_action:
+                self.logger.debug("简单任务，直接执行 next_action")
+                async for chunk in self._execute_direct_action(next_action, context):
+                    yield chunk
+            else:
+                self.logger.warning("简单任务分析未提供 next_action，降级为父类执行")
+                async for chunk in super()._execute_task_stream(context):
+                    yield chunk
+        elif analyzed_level == "direct":
+            self.logger.debug("直接回答任务，执行 next_action")
             async for chunk in self._execute_direct_action(next_action, context):
                 yield chunk
         elif plan:
             self.logger.debug("复杂任务，执行计划")
-            self._publish_plan_start(session_id, execution_id, task_id)
-
             plan_descriptions = [step.get("description", str(step)) for step in plan]
-            self._publish_plan_events(session_id, execution_id, plan_descriptions, task_id)
-
             async for chunk in self._execute_plan_steps(plan_descriptions, context):
                 yield chunk
         else:
             self.logger.warning("无法处理任务，降级为父类执行")
             async for chunk in super()._execute_task_stream(context):
                 yield chunk
+        self._publish_plan_events(session_id, execution_id, plan_descriptions, task_id)
 
     async def _execute_direct_action(
         self,
@@ -320,14 +328,12 @@ class AsyncPlanReActEngine(AsyncReActCore):
         action_input = action_data.get("action_input")
 
         self.logger.debug(f"直接执行行动：action={action}, thought={thought[:50]}...")
-        self._publish_step_start(session_id, execution_id, 0, 1)
-        if thought:
-            self._publish_think_stream(session_id, execution_id, 0, thought)
-
+    
         if action == "finish":
-            result = action_input if isinstance(action_input, str) else str(action_input)
-            self._publish_task_end(session_id, execution_id, result, task_id, task)
+            final_result = action_input if isinstance(action_input, str) else str(action_input)
+            self._publish_task_end(final_result, context)
         else:
+            self._publish_step_start(session_id, execution_id, 0, 1)
             observation = self._execute_action(action, action_input)
             self._publish_step_end(
                 session_id, execution_id, 0,
@@ -338,9 +344,10 @@ class AsyncPlanReActEngine(AsyncReActCore):
                 [{"thought": thought, "action": action, "observation": observation}],
                 "simple"
             )
-            self._publish_task_end(session_id, execution_id, final_result, task_id, task)
+            self._publish_task_end(final_result, context)
         
-        yield
+        if stream:
+            yield {"type": "task_finish", "result": final_result}
         return
 
     async def _analyze_task_and_plan(
@@ -363,13 +370,22 @@ class AsyncPlanReActEngine(AsyncReActCore):
         Returns:
             分析结果
         """
-        messages = PromptTemplates.build_task_analysis_messages_with_cache(
-            task, task_info, history_context
-        )
+        available_skills = self.skill_caller.list_available_skills(enabled_only=True) if self.skill_caller else []
+        skills_list = PromptTemplates.format_skills_list(available_skills)
+        system_info = PromptTemplates.get_system_info()
         
+        messages = PromptTemplates.build_task_analysis_messages_with_cache(
+            task=task,
+            history_context=history_context,
+            skills_list=skills_list,
+            system_info=system_info,
+            max_plan_steps=self.max_plan_steps
+        )
+        self.logger.debug(f"发往 LLM 的任务计划消息：{messages}")
+        last_thought = ""
         try:
             full_response = ""
-            async for chunk in self.async_llm_client.stream_chat(messages, task_info.get("level", "simple")):
+            async for chunk in self.async_llm_client.stream_chat(messages, task_info.get("level", "simple"), enable_thinking=False):
                 choices = chunk.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
@@ -377,14 +393,20 @@ class AsyncPlanReActEngine(AsyncReActCore):
                         content = delta["content"]
                         if content:  # 只有当 content 不为 None 和空字符串时才处理
                             full_response += content
-                    if "reasoning_content" in delta:
-                        reasoning = delta["reasoning_content"]
-                        if reasoning:
-                            self._publish_think_stream(session_id, execution_id, -1, reasoning)
+                            # 尝试提取thought字段
+                            from lingxi.utils.json_parser import extract_partial_json_field
+                            thought = extract_partial_json_field(full_response, "thought")
+                            if thought and thought != last_thought:
+                                # 只输出增量的thought内容
+                                incremental_thought = thought[len(last_thought):] if last_thought else thought
+                                last_thought = thought
+                                self._publish_think_stream(session_id, execution_id, -1, incremental_thought)
+                   
+                        
 
             import json
             import re
-            
+            self.logger.debug(f"原始 LLM 响应：{full_response}")
             json_match = re.search(r'\{.*\}', full_response, re.DOTALL)
             if json_match:
                 json_str = json_match.group()

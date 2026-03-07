@@ -78,7 +78,7 @@ class AsyncLingxiAssistant:
 
             context = TaskContext(
                 user_input=user_input,
-                task_info={"level": "complex"},
+                task_info={"level": "simple"},
                 session_id=session_id,
                 session_history=history,
                 stream=stream

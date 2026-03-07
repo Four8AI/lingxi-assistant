@@ -223,7 +223,7 @@ class PromptTemplates:
 
         executed_steps = PromptTemplates.format_executed_steps(steps, include_thought=False, max_prev_length=5000)
 
-        system_prompt = f"""你是灵犀智能助手，使用ReAct模式解决问题。
+        system_prompt = f"""你是万能的灵犀智能助手，使用ReAct模式解决问题。
 
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
@@ -319,7 +319,16 @@ Action Input: {{"file_path": "test.txt"}}
         if system_info is None:
             system_info = PromptTemplates.get_system_info()
 
-        system_prompt = f"""你是智能任务分析器，需要分析用户任务并输出处理方案，处理方案要精炼。
+        system_prompt = f"""你是万能的灵犀智能助手，需要使用工具完成用户任务。
+
+ ## 你的能力
+ - 陪聊天
+ - 操作表格
+ - 编辑文档
+ - 写代码
+ - 翻译
+ - anything       
+
 
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
@@ -332,7 +341,7 @@ finish(answer) - 完成任务并返回答案
 
 请严格按照以下JSON格式输出，不要包含任何其他文字：
 {{
-  "level": "simple|complex",
+  "level": "direct|simple|complex",
   "confidence": 0.0-1.0,
   "reason": "分类理由",
   "direct_answer": "如果是简单问候或可直接回答的问题，在此给出答案",
@@ -352,17 +361,16 @@ finish(answer) - 完成任务并返回答案
 - complex: 多步骤、多工具调用、需要规划（如：旅行规划、数据分析、多文件处理）
 
 注意事项：
-- 如果是simple任务，必须填写next_action字段，plan字段可以为空数组
+- 如果是simple任务，可以使用现有技能一步完成任务填写next_action字段，plan字段可以为空数组
 - 如果是complex任务，必须填写plan字段，next_action可以为空
-- 如果是问候类或可直接回答的问题，level设为simple，action设为finish，action_input为回答内容
-- 如果是complex任务，plan最多{max_plan_steps}个步骤，每个步骤描述要精炼，优先使用已有的技能
-- 每个步骤应该是独立可执行的子任务
+- 如果是问候类或可直接回答的问题，level设为direct，action设为finish，action_input为回答内容
+- 如果是complex任务，plan最多{max_plan_steps}个步骤，每个步骤描述要精炼，优先使用已有的技能处理
 - 必须返回有效的JSON格式"""
 
         history_part = f"""历史上下文：
 {history_context if history_context else "无"}"""
 
-        user_input_part = f"""用户任务：{task}"""
+        user_input_part = f"""用户任务：{task}\n 请输出下一步："""
 
         messages = [
             {

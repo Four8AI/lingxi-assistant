@@ -68,7 +68,7 @@
         </div>
         <div v-if="!turn.isStreaming && !hasRunningSteps(turn)" class="message-text-container">
           <div v-if="turn.role === 'assistant'" class="message-text-wrapper">
-            <h3 class="message-text-title">最终结果</h3>
+            <h3 v-if="turn.taskLevel === 'complex'" class="message-text-title">最终结果</h3>
             <div class="message-text" v-html="renderMarkdown(turn.content)" />
           </div>
           <div v-else class="message-text-user" v-html="renderMarkdown(turn.content)" />

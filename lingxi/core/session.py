@@ -223,6 +223,11 @@ class SessionManager:
             self.logger.info("检测到旧版数据库表结构，添加 output_tokens 列")
             cursor.execute("ALTER TABLE tasks ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
         
+        # 如果 tasks 表存在但缺少 task_level 列，添加该列
+        if task_columns and 'task_level' not in task_columns:
+            self.logger.info("检测到旧版数据库表结构，添加 task_level 列")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN task_level TEXT NOT NULL DEFAULT 'none'")
+        
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
@@ -240,6 +245,7 @@ class SessionManager:
                 task_id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 task_type TEXT NOT NULL,
+                task_level TEXT NOT NULL DEFAULT 'none',
                 plan TEXT,
                 user_input TEXT,
                 result TEXT,
@@ -434,7 +440,7 @@ class SessionManager:
         
         return tasks
 
-    def create_task(self, session_id: str, task_id: str, task_type: str, user_input: str = "") -> str:
+    def create_task(self, session_id: str, task_id: str, task_type: str, user_input: str = "", task_level: str = "none") -> str:
         """创建新任务
 
         Args:
@@ -442,6 +448,7 @@ class SessionManager:
             task_id: 任务ID
             task_type: 任务类型
             user_input: 用户输入
+            task_level: 任务级别
 
         Returns:
             任务ID
@@ -450,12 +457,12 @@ class SessionManager:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO tasks 
-                (task_id, session_id, task_type, user_input, status, current_step_idx, replan_count, 
+                (task_id, session_id, task_type, task_level, user_input, status, current_step_idx, replan_count, 
                  input_tokens, output_tokens, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'running', 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (task_id, session_id, task_type, user_input))
+                VALUES (?, ?, ?, ?, ?, 'running', 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (task_id, session_id, task_type, task_level, user_input))
         
-        self.logger.debug(f"任务已创建，session_id: {session_id}, task_id: {task_id}, task_type: {task_type}")
+        self.logger.debug(f"任务已创建，session_id: {session_id}, task_id: {task_id}, task_type: {task_type}, task_level: {task_level}")
         
         return task_id
 
@@ -779,68 +786,6 @@ class SessionManager:
             WHERE task_id = ?
         """
         self._execute_sql(sql, (error_info, task_id))
-
-    def update_task_tokens(self, task_id: str, input_tokens: int, output_tokens: int):
-        """更新任务 Token 数量
-
-        Args:
-            task_id: 任务ID
-            input_tokens: 输入 Token 数量
-            output_tokens: 输出 Token 数量
-        """
-        sql = """
-            UPDATE tasks 
-            SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, updated_at = CURRENT_TIMESTAMP
-            WHERE task_id = ?
-        """
-        self._execute_sql(sql, (input_tokens, output_tokens, task_id))
-
-    def get_task_tokens(self, task_id: str) -> Dict[str, int]:
-        """获取任务 Token 数量
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            Token 数量字典 {"input_tokens": int, "output_tokens": int}
-        """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT input_tokens, output_tokens FROM tasks WHERE task_id = ?
-        """, (task_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {
-                "input_tokens": row[0],
-                "output_tokens": row[1]
-            }
-        return {"input_tokens": 0, "output_tokens": 0}
-
-    def get_task_total_tokens(self, task_id: str) -> int:
-        """获取任务总 Token 数量（input + output）
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            总 Token 数量
-        """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT input_tokens + output_tokens as total FROM tasks WHERE task_id = ?
-        """, (task_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        return row[0] if row else 0
 
     def _save_to_db(self, session_id: str, history: List[Dict[str, Any]]):
         """保存会话历史到数据库（已废弃，保留向后兼容）"""
@@ -1194,7 +1139,7 @@ class SessionManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT task_id, task_type, plan, user_input, result, status, created_at, updated_at
+            SELECT task_id, task_type, task_level, plan, user_input, result, status, created_at, updated_at
             FROM tasks
             WHERE session_id = ?
             ORDER BY created_at ASC
@@ -1204,7 +1149,7 @@ class SessionManager:
         # 组装任务列表
         task_list = []
         for task_row in task_rows:
-            task_id, task_type, plan, user_input, result, status, task_created_at, task_updated_at = task_row
+            task_id, task_type, task_level, plan, user_input, result, status, task_created_at, task_updated_at = task_row
             
             # 查询该任务的所有步骤
             cursor.execute("""
@@ -1235,6 +1180,7 @@ class SessionManager:
             task_list.append({
                 "task_id": task_id,
                 "task_type": task_type,
+                "task_level": task_level,
                 "plan": plan,
                 "user_input": user_input,
                 "result": result,

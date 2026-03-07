@@ -96,6 +96,11 @@ export class WsClient extends EventEmitter {
   }
 
   private handleMessage(data: any): void {
+    if (!data) {
+      console.warn('[WsClient] 收到空消息，忽略')
+      return
+    }
+    
     const { type, payload } = data
 
     switch (type) {

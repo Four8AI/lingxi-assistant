@@ -97,14 +97,14 @@ async function initializeApp() {
             content: task.result || '',
             timestamp: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
             time: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
-            // 保留原始数据中的步骤、思考等信息
             steps: task.steps || [],
             thought: task.thought || '',
             thought_chain: task.thought_chain || null,
             plan: task.plan || null,
             executionId: task.task_id || null,
             status: task.status || null,
-            isThinking: false
+            isThinking: false,
+            taskLevel: task.task_level || 'simple'
           })
         })
         
@@ -159,7 +159,8 @@ function setupWebSocketListeners() {
           ...updatedTurns[tempIndex],
           executionId: data.executionId,
           status: 'running',
-          isStreaming: true
+          isStreaming: true,
+          taskLevel: data.task_level || 'simple'
         }
         appStore.setTurns(updatedTurns)
       } else {
@@ -174,7 +175,8 @@ function setupWebSocketListeners() {
           isThinking: false,
           thought: '',
           steps: [],
-          plan: null
+          plan: null,
+          taskLevel: data.task_level || 'simple'
         }
         appStore.setTurns([...appStore.turns, assistantMessage])
       }
