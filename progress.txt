@@ -258,6 +258,49 @@
 
 ### 测试验证：
 - ✅ 11 个工作目录相关测试全部通过
+
+---
+
+## 2026-03-09 - Bug 修复（续）：WorkspaceManager 未读取持久化的工作目录
+
+### 问题：
+配置文件 `config.yaml` 中有 `workspace.last_workspace: F:\work\workspace1`，但 `WorkspaceManager.__init__` 没有读取这个配置并初始化工作目录。
+
+### 根本原因：
+1. `WorkspaceManager.__init__` 没有读取 `config["workspace"]["last_workspace"]`
+2. `initialize()` 方法没有更新 `sandbox` 的工作目录
+3. `set_resources()` 没有在设置资源后初始化工作目录
+
+### 修复内容：
+
+1. **WorkspaceManager.__init__** (`lingxi/management/workspace.py`)：
+   - 添加读取持久化工作目录的逻辑
+   - 如果找到 `last_workspace` 配置，自动调用 `initialize()`
+
+2. **WorkspaceManager.initialize** (`lingxi/management/workspace.py`)：
+   - 添加更新 `sandbox` 工作目录的步骤
+   - 确保初始化时 `sandbox.workspace_root` 正确设置
+
+3. **WorkspaceManager.set_resources** (`lingxi/management/workspace.py`)：
+   - 在设置资源后，如果工作目录未初始化，尝试从配置读取并初始化
+
+### 数据流修复：
+```
+WorkspaceManager.__init__
+    → 读取 config["workspace"]["last_workspace"]
+    → 调用 initialize(last_workspace)
+        → 设置 current_workspace
+        → 更新 sandbox.update_workspace(workspace_path)
+        → SecuritySandbox.workspace_root 更新
+
+set_resources(sandbox, skill_caller, session_store)
+    → 如果 current_workspace 为 None
+        → 读取 config["workspace"]["last_workspace"]
+        → 调用 initialize(last_workspace)
+```
+
+### 测试验证：
+- ✅ 11 个工作目录相关测试全部通过
 - ✅ `get_system_info()` 默认行为正确
 - ✅ `get_system_info('/custom/path')` 使用自定义路径
 

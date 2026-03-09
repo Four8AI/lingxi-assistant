@@ -53,6 +53,18 @@ class WorkspaceManager:
         self.event_publisher = None
         
         self.logger = logging.getLogger(__name__)
+        
+        # 读取持久化的工作目录并初始化
+        workspace_config = config.get("workspace", {})
+        last_workspace = workspace_config.get("last_workspace")
+        if last_workspace:
+            self.logger.info(f"读取到持久化的工作目录：{last_workspace}")
+            try:
+                self.initialize(last_workspace)
+            except Exception as e:
+                self.logger.warning(f"初始化持久化工作目录失败：{e}，将使用默认目录")
+        else:
+            self.logger.debug("未找到持久化的工作目录配置")
     
     def set_resources(self, sandbox=None, skill_caller=None, session_store=None, event_publisher=None):
         """设置资源引用
@@ -68,6 +80,19 @@ class WorkspaceManager:
         self.session_store = session_store
         self.event_publisher = event_publisher
         self.logger.debug(f"工作目录资源引用已设置，session_store: {session_store is not None}")
+        
+        # 如果当前工作目录未初始化，尝试从配置中读取并初始化
+        if self.current_workspace is None:
+            workspace_config = self.config.get("workspace", {})
+            last_workspace = workspace_config.get("last_workspace")
+            if last_workspace:
+                self.logger.info(f"从配置读取持久化的工作目录：{last_workspace}")
+                try:
+                    self.initialize(last_workspace)
+                except Exception as e:
+                    self.logger.warning(f"初始化持久化工作目录失败：{e}")
+            else:
+                self.logger.debug("未找到持久化的工作目录配置")
     
     def initialize(self, workspace_path: Optional[str] = None) -> Path:
         """初始化工作目录
@@ -93,7 +118,12 @@ class WorkspaceManager:
         # 4. 设置当前工作目录
         self.current_workspace = workspace_path
         
-        # 5. 发布事件
+        # 5. 更新 sandbox 的工作目录
+        if self.sandbox:
+            self.sandbox.update_workspace(workspace_path)
+            self.logger.debug(f"SecuritySandbox 工作目录已更新：{workspace_path}")
+        
+        # 6. 发布事件
         if self.event_publisher:
             self.event_publisher.publish("workspace_initialized", {
                 "workspace": str(workspace_path),
