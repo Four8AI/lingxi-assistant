@@ -19,6 +19,7 @@ cls_news_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cls_news_module)
 get_cls_news_selenium = cls_news_module.get_cls_news_selenium
 get_cls_news_requests = cls_news_module.get_cls_news_requests
+get_cls_news_playwright = cls_news_module.get_cls_news_playwright_sync
 
 
 def parse_time_str(time_str: str) -> datetime:
@@ -120,7 +121,7 @@ def execute(parameters: Dict[str, Any]) -> str:
         parameters: Parameters dictionary
             - hours: Filter news from last N hours (optional, default: 24)
             - num_results: Number of news items to return (optional, default: 20)
-            - method: Preferred method - "selenium" or "requests" (optional, default: "selenium")
+            - method: Preferred method - "playwright", "selenium" or "requests" (optional, default: "playwright")
     
     Returns:
         Formatted financial news
@@ -129,7 +130,7 @@ def execute(parameters: Dict[str, Any]) -> str:
     
     hours = parameters.get("hours", 24)
     num_results = parameters.get("num_results", 20)
-    method = parameters.get("method", "selenium")
+    method = parameters.get("method", "playwright")
     
     logger.info(f"获取财经新闻: 最近{hours}小时, 结果数:{num_results}, 方法:{method}")
     
@@ -139,13 +140,24 @@ def execute(parameters: Dict[str, Any]) -> str:
         if method == "requests":
             logger.info("使用 requests 方法获取新闻")
             news_list = get_cls_news_requests()
-        else:
+        elif method == "selenium":
             logger.info("使用 selenium 方法获取新闻")
             news_list = get_cls_news_selenium()
             
             if not news_list:
                 logger.info("Selenium 方法失败，回退到 requests 方法")
                 news_list = get_cls_news_requests()
+        else:
+            logger.info("使用 playwright 方法获取新闻")
+            news_list = get_cls_news_playwright()
+            
+            if not news_list:
+                logger.info("Playwright 方法失败，回退到 selenium 方法")
+                news_list = get_cls_news_selenium()
+                
+                if not news_list:
+                    logger.info("Selenium 方法失败，回退到 requests 方法")
+                    news_list = get_cls_news_requests()
         
         if not news_list:
             return "未能获取到财经新闻，请检查网络连接或稍后重试"

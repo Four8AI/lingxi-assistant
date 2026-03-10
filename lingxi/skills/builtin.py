@@ -6,9 +6,21 @@ from lingxi.skills.skill_loader import SkillLoader
 
 
 class BuiltinSkills:
-    """技能管理类，统一管理所有MCP格式技能"""
-
+    """技能管理类，统一管理所有 MCP 格式技能（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         """初始化技能管理
 
         Args:
@@ -35,6 +47,7 @@ class BuiltinSkills:
         self.skill_loader.scan_and_register(self.registry)
 
         self.logger.debug("初始化技能管理完成")
+        self._initialized = True
 
     def execute_skill(self, skill_name: str, parameters: Dict[str, Any]) -> str:
         """执行技能

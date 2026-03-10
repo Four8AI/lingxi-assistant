@@ -30,7 +30,21 @@ class ExecutionError(Exception):
 
 
 class SecuritySandbox:
-    """安全沙箱，限制文件操作范围和命令执行"""
+    """安全沙箱，限制文件操作范围和命令执行（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(
+        cls,
+        workspace_root: str = "./workspace",
+        max_file_size: int = 10 * 1024 * 1024,
+        allowed_commands: Optional[List[str]] = None,
+        safety_mode: bool = True
+    ):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(
         self,
@@ -39,14 +53,10 @@ class SecuritySandbox:
         allowed_commands: Optional[List[str]] = None,
         safety_mode: bool = True
     ):
-        """初始化安全沙箱
-
-        Args:
-            workspace_root: 工作空间根目录
-            max_file_size: 最大文件大小（字节），默认10MB
-            allowed_commands: 允许执行的命令白名单
-            safety_mode: 是否启用安全模式
-        """
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         self.workspace_root = Path(workspace_root).resolve()
         self.max_file_size = max_file_size
         self.safety_mode = safety_mode
@@ -62,8 +72,9 @@ class SecuritySandbox:
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
         
-        self.logger.info(f"安全沙箱初始化: workspace={self.workspace_root}, "
+        self.logger.info(f"安全沙箱初始化：workspace={self.workspace_root}, "
                        f"max_file_size={max_file_size}, safety_mode={safety_mode}")
+        self._initialized = True
     
     def validate_path(self, file_path: str) -> Path:
         """验证文件路径是否在允许范围内

@@ -5,10 +5,22 @@ import json
 from typing import Dict, Optional, Any, List, Union, Generator, Tuple
 
 class LLMClient:
-    """LLM客户端，用于与大语言模型交互，支持上下文缓存"""
-
+    """LLM 客户端，用于与大语言模型交互，支持上下文缓存（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
-        """初始化LLM客户端
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
+        """初始化 LLM 客户端
 
         Args:
             config: 系统配置
@@ -34,9 +46,10 @@ class LLMClient:
 
         self._init_client()
 
-        self.logger.debug(f"初始化LLM客户端: {self.provider}")
-        self.logger.debug(f"默认模型: {self.model}")
-        self.logger.debug(f"模型分级配置: {list(self.models_config.keys())}")
+        self.logger.debug(f"初始化 LLM 客户端：{self.provider}")
+        self.logger.debug(f"默认模型：{self.model}")
+        self.logger.debug(f"模型分级配置：{list(self.models_config.keys())}")
+        self._initialized = True
 
     def _init_client(self):
         """初始化客户端"""

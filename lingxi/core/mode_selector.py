@@ -14,7 +14,15 @@ class ExecutionModeSelector:
     - simple: PlanReActEngine（智能路由，直接执行 next_action）
     - complex: PlanReActEngine（智能路由，执行多步计划）
     """
-
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any], skill_caller: SkillCaller = None):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any], skill_caller: SkillCaller = None):
         """初始化执行模式选择器
 

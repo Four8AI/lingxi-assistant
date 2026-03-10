@@ -9,17 +9,26 @@ from lingxi.core.session import SessionManager
 
 
 class SessionStoreSubscriber:
-    """会话存储事件订阅者"""
-
-    def __init__(self, sessionManage: SessionManager):
-        """初始化会话存储订阅者
-
-        Args:
-            sessionManage: 会话管理实例
-        """
-        self.sessionManage = sessionManage
+    """会话存储事件订阅者（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, sessionManage: SessionManager = None):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, sessionManage: SessionManager = None):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        # 如果首次初始化时传入了 sessionManage，则保存
+        if sessionManage:
+            self.sessionManage = sessionManage
         self.logger = logging.getLogger(__name__)
         self._subscribe_to_events()
+        self._initialized = True
 
     def _subscribe_to_events(self):
         """订阅事件"""

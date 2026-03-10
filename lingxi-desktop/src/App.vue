@@ -220,6 +220,9 @@ function setupWebSocketListeners() {
           appStore.setTurns(updatedTurns)
         }
       }
+      
+      // 任务结束后刷新工作区目录
+      workspaceStore.refreshDirectoryTree()
     })
 
     window.electronAPI.ws.onThinkStart((data) => {

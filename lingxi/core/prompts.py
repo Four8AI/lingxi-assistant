@@ -11,8 +11,16 @@ from typing import Dict, List, Any, Optional
 
 
 class PromptTemplates:
-    """提示词模板类，集中管理所有提示词模板"""
-
+    """提示词模板类，集中管理所有提示词模板（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     @staticmethod
     def get_system_info(workspace_path: Optional[str] = None) -> Dict[str, str]:
         """获取系统环境信息
@@ -23,13 +31,18 @@ class PromptTemplates:
         Returns:
             系统信息字典
         """
+        from datetime import datetime
         system_info = platform.system()
         current_dir = workspace_path if workspace_path else os.getcwd()
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_time = datetime.now().strftime("%H:%M:%S")
         return {
             "system_info": system_info,
             "os_info": f"{system_info} {platform.release()}",
             "current_dir": current_dir,
-            "shell_type": "PowerShell" if system_info == "Windows" else "Bash"
+            "shell_type": "PowerShell" if system_info == "Windows" else "Bash",
+            "current_date": current_date,
+            "current_time": current_time
         }
 
     @staticmethod
@@ -232,6 +245,8 @@ class PromptTemplates:
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
+当前日期: {system_info['current_date']}
+当前时间: {system_info['current_time']}
 
 任务类型: {task_info.get('level', task_info.get('task_type', '未知'))}
 任务描述: {task_info.get('reason', task_info.get('description', '无'))}
@@ -328,6 +343,8 @@ Action Input: {{"file_path": "test.txt"}}
 系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
+当前日期: {system_info['current_date']}
+当前时间: {system_info['current_time']}
 
 可用工具:
 {skills_list}

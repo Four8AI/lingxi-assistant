@@ -163,8 +163,16 @@ class Session:
 
 
 class SessionManager:
-    """会话管理器，实现SQLite存储、检查点功能和上下文管理"""
-
+    """会话管理器，实现 SQLite 存储、检查点功能和上下文管理"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any], session_id: str = "default"):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any], session_id: str = "default"):
         """初始化会话管理器
 

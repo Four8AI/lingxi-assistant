@@ -41,9 +41,20 @@ class ConfirmationResponse:
 
 
 class ConfirmationManager:
-    """确认管理器"""
+    """确认管理器（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, timeout: int = 60, auto_reject_timeout: bool = True):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, timeout: int = 60, auto_reject_timeout: bool = True):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
         """初始化确认管理器
 
         Args:
@@ -57,7 +68,8 @@ class ConfirmationManager:
         self._response_callbacks: Dict[str, Callable] = {}
         self.logger = logging.getLogger(__name__)
         
-        self.logger.debug(f"确认管理器初始化: timeout={timeout}s, auto_reject={auto_reject_timeout}")
+        self.logger.debug(f"确认管理器初始化：timeout={timeout}s, auto_reject={auto_reject_timeout}")
+        self._initialized = True
     
     def create_request(
         self,

@@ -4,12 +4,24 @@ from lingxi.core.event import global_event_publisher
 
 
 class ConsoleSubscriber:
-    """控制台事件订阅者 - 统一处理控制台输出"""
-
+    """控制台事件订阅者 - 统一处理控制台输出（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
         self.logger = logging.getLogger(__name__)
         self._final_result: str = ""
         self._subscribe_to_events()
+        self._initialized = True
 
     def _subscribe_to_events(self):
         global_event_publisher.subscribe('think_start', self.handle_think_start)

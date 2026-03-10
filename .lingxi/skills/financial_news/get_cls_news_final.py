@@ -1,6 +1,6 @@
 """
 财联社新闻获取工具
-使用Selenium获取财联社新闻内容
+使用Selenium和Playwright获取财联社新闻内容
 """
 
 import requests
@@ -128,12 +128,125 @@ def get_cls_news_selenium():
         traceback.print_exc()
         return []
 
+async def get_cls_news_playwright():
+    """
+    使用Playwright获取财联社新闻
+    """
+    try:
+        from playwright.async_api import async_playwright
+        import asyncio
+        
+        print("正在启动Playwright...")
+        
+        async with async_playwright() as p:
+            # 启动浏览器
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    f'--user-agent={HEADERS["User-Agent"]}'
+                ]
+            )
+            
+            # 创建页面
+            page = await browser.new_page()
+            
+            print("正在访问财联社...")
+            await page.goto('https://www.cls.cn/', timeout=60000)
+            
+            # 等待页面加载
+            print("等待页面加载...")
+            await page.wait_for_load_state('networkidle', timeout=60000)
+            await asyncio.sleep(5)  # 额外等待以确保页面完全加载
+            
+            # 获取页面源码
+            page_source = await page.content()
+            await browser.close()
+            
+            print("正在解析页面...")
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            # 查找新闻元素
+            news_list = []
+            
+            # 选择器: 查找所有新闻项
+            news_items = soup.find_all('div', class_='subject-interest-list')
+            print(f"Playwright方法找到 {len(news_items)} 个新闻项")
+            
+            for item in news_items[:30]:
+                try:
+                    # 标题
+                    title_div = item.find('div', class_='subject-interest-title')
+                    if title_div:
+                        title_tag = title_div.find('a')
+                        title = title_tag.get_text(strip=True) if title_tag else ''
+                        link = title_tag.get('href', '') if title_tag else ''
+                    else:
+                        # 备用方法
+                        title_tag = item.find('a', href=True)
+                        title = title_tag.get_text(strip=True) if title_tag else ''
+                        link = title_tag.get('href', '') if title_tag else ''
+                    
+                    # 摘要
+                    brief_tag = item.find('div', class_='subject-interest-brief')
+                    brief = brief_tag.get_text(strip=True) if brief_tag else ''
+                    
+                    # 时间
+                    time_tag = item.find('div', class_='subject-interest-time')
+                    time_str = time_tag.get_text(strip=True) if time_tag else ''
+                    
+                    if title and link:
+                        if not link.startswith('http'):
+                            link = 'https://www.cls.cn' + link
+                        
+                        news_list.append({
+                            'title': title,
+                            'link': link,
+                            'brief': brief,
+                            'time': time_str,
+                            'method': 'playwright'
+                        })
+                except Exception as e:
+                    continue
+            
+            # 去重
+            seen = set()
+            unique_news = []
+            for news in news_list:
+                link = news.get('link', '')
+                if link and link not in seen:
+                    seen.add(link)
+                    unique_news.append(news)
+            
+            print(f"去重后: {len(unique_news)} 条新闻")
+            return unique_news[:20]
+    
+    except ImportError as e:
+        print(f"错误: 未安装playwright")
+        print(f"安装命令: pip install playwright")
+        print(f"然后运行: playwright install")
+        return []
+    except Exception as e:
+        print(f"Playwright出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def get_cls_news_playwright_sync():
+    """
+    同步版本的Playwright新闻获取函数
+    """
+    import asyncio
+    return asyncio.run(get_cls_news_playwright())
+
 def get_cls_news_requests():
     """
     使用requests获取财联社新闻（备用方法）
     """
     try:
-        url = 'https://www.cls.cn/depth?id=1000'
+        url = 'https://www.cls.cn/'
         response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         
@@ -209,13 +322,18 @@ def main():
     print("财联社新闻获取工具")
     print("="*80 + "\n")
     
-    # 优先使用Selenium
-    print("方法1: 使用Selenium获取新闻...")
-    news_list = get_cls_news_selenium()
+    # 优先使用Playwright
+    print("方法1: 使用Playwright获取新闻...")
+    news_list = get_cls_news_playwright_sync()
+    
+    # 如果Playwright失败，尝试Selenium
+    if not news_list:
+        print("\n方法1失败，尝试方法2: 使用Selenium...")
+        news_list = get_cls_news_selenium()
     
     # 如果Selenium失败，尝试requests
     if not news_list:
-        print("\n方法1失败，尝试方法2: 使用requests...")
+        print("\n方法2失败，尝试方法3: 使用requests...")
         news_list = get_cls_news_requests()
     
     if news_list:
@@ -227,8 +345,9 @@ def main():
         print("\n请检查：")
         print("1. 网络连接是否正常")
         print("2. 是否已安装Chrome浏览器")
-        print("3. selenium是否正确安装: pip install selenium")
-        print("4. 查看保存的 cls_page_debug.html 了解页面结构")
+        print("3. playwright是否正确安装: pip install playwright && playwright install")
+        print("4. selenium是否正确安装: pip install selenium")
+        print("5. 查看保存的 cls_page_debug.html 了解页面结构")
 
 if __name__ == "__main__":
     main()

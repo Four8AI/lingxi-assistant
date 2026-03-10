@@ -5,13 +5,25 @@ import functools
 
 
 class EventPublisher:
-    """事件发布者"""
-
+    """事件发布者（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
         """初始化事件发布者"""
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
         self._subscribers: Dict[str, List[Callable]] = {}
         self._error_handlers: List[Callable] = []
         self.logger = logging.getLogger(__name__)
+        self._initialized = True
 
     def subscribe(self, event_type: str, callback: Callable):
         """订阅事件

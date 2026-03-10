@@ -8,7 +8,15 @@ from lingxi.core.prompts import PromptTemplates
 
 class TaskClassifier:
     """任务分类器，实现三级分类（trivial/simple/complex）"""
-
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
         """初始化任务分类器
 

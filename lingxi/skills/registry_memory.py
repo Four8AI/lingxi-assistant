@@ -11,7 +11,14 @@ from pathlib import Path
 
 class SkillRegistry:
     """技能注册表（纯内存版本）"""
-
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     def __init__(self, config: Dict[str, Any]):
         """初始化技能注册表
 
@@ -30,6 +37,8 @@ class SkillRegistry:
         self._load_config()
 
         self.logger.debug(f"初始化技能注册表（纯内存版本）: {self.config_path}")
+        
+        self._initialized = True 
 
     def _load_config(self):
         """加载技能配置文件"""

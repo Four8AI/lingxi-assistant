@@ -12,8 +12,16 @@ _skill_executor = ThreadPoolExecutor(max_workers=20, thread_name_prefix="skill-e
 
 
 class SkillCaller:
-    """能力调用层，标准化MCP/Skill调用"""
-
+    """能力调用层，标准化 MCP/Skill 调用"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
         """初始化能力调用层
 

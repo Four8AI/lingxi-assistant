@@ -11,9 +11,21 @@ from pathlib import Path
 
 
 class SkillLoader:
-    """技能加载器，负责扫描和自动注册技能"""
-
+    """技能加载器，负责扫描和自动注册技能（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         """初始化技能加载器
 
         Args:
@@ -34,6 +46,7 @@ class SkillLoader:
         self.mcp_skills: Dict[str, Dict[str, Any]] = {}
 
         self.logger.debug(f"初始化技能加载器，内置技能目录: {self.builtin_skills_dir}, 用户技能目录: {self.user_skills_dir}")
+        self._initialized = True
 
     def scan_and_register(self, registry) -> int:
         """扫描技能目录并自动注册所有技能

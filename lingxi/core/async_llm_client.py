@@ -11,9 +11,21 @@ import httpx
 
 
 class AsyncLLMClient:
-    """异步 LLM 客户端，用于与大语言模型交互"""
-
+    """异步 LLM 客户端，用于与大语言模型交互（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config: Dict[str, Any]):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         """初始化异步 LLM 客户端
 
         Args:
@@ -43,6 +55,7 @@ class AsyncLLMClient:
 
         self.logger.debug(f"初始化异步 LLM 客户端：{self.provider}")
         self.logger.debug(f"默认模型：{self.model}")
+        self._initialized = True
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """确保 HTTP 客户端已创建"""

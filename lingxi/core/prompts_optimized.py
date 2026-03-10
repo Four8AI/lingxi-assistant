@@ -52,12 +52,17 @@ class PromptTemplates:
         Returns:
             系统信息字典
         """
+        from datetime import datetime
         system_info = platform.system()
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_time = datetime.now().strftime("%H:%M:%S")
         return {
             "system_info": system_info,
             "os_info": f"{system_info} {platform.release()}",
             "current_dir": os.getcwd(),
-            "shell_type": "PowerShell" if system_info == "Windows" else "Bash"
+            "shell_type": "PowerShell" if system_info == "Windows" else "Bash",
+            "current_date": current_date,
+            "current_time": current_time
         }
 
     @staticmethod
@@ -238,6 +243,8 @@ class PromptTemplates:
             system_section = f"""系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
+当前日期: {system_info['current_date']}
+当前时间: {system_info['current_time']}
 
 任务类型: {task_info.get('task_type', '未知')}
 任务描述: {task_info.get('description', '无')}
@@ -303,6 +310,8 @@ Shell类型: {system_info['shell_type']}
         prompt = f"""系统环境: {system_info['os_info']}
 当前工作目录: {system_info['current_dir']}
 Shell类型: {system_info['shell_type']}
+当前日期: {system_info['current_date']}
+当前时间: {system_info['current_time']}
 
 任务类型: {task_info.get('level', '未知')}
 任务描述: {task_info.get('reason', '无')}

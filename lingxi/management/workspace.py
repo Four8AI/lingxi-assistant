@@ -33,9 +33,21 @@ class WorkspaceSwitchError(WorkspaceError):
 
 
 class WorkspaceManager:
-    """工作目录管理器（事件驱动 + 资源管理器模式）"""
+    """工作目录管理器（事件驱动 + 资源管理器模式）（单例模式）"""
+    
+    _instance = None  # 单例实例
+    
+    def __new__(cls, config: Dict[str, Any]):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, config: Dict[str, Any]):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         """初始化工作目录管理器
         
         Args:
@@ -65,6 +77,8 @@ class WorkspaceManager:
                 self.logger.warning(f"初始化持久化工作目录失败：{e}，将使用默认目录")
         else:
             self.logger.debug("未找到持久化的工作目录配置")
+        
+        self._initialized = True
     
     def set_resources(self, sandbox=None, skill_caller=None, session_store=None, event_publisher=None):
         """设置资源引用
@@ -393,12 +407,12 @@ class WorkspaceManager:
         
         registry = self.skill_caller.skill_registry
         workspace_skills = [
-            name for name, info in registry.skills.items()
+            name for name, info in registry.skill_cache.items()
             if info.get("source") == "workspace"
         ]
         
         for skill_name in workspace_skills:
-            del registry.skills[skill_name]
+            del registry.skill_cache[skill_name]
             self.logger.debug(f"已注销工作目录技能：{skill_name}")
     
     def _initialize_database(self, data_dir: Path):

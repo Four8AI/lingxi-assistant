@@ -151,7 +151,19 @@ class WebSocketConnection:
 class WebSocketManager:
     """WebSocket 连接管理器（增强版，支持异步）"""
 
-    def __init__(self, assistant: AsyncLingxiAssistant):
+    _instance = None  # 单例实例
+    
+    def __new__(cls, assistant: AsyncLingxiAssistant = None):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self, assistant: AsyncLingxiAssistant = None):
+        # 防止重复初始化
+        if hasattr(self, '_initialized'):
+            return
+        
         """初始化 WebSocket 管理器
 
         Args:
@@ -162,6 +174,7 @@ class WebSocketManager:
         self.assistant = assistant
         self.connection_counter = 0
         self.stream_callbacks: Dict[str, Callable] = {}
+        self._initialized = True
 
     async def connect(self, websocket: WebSocket, session_id: str = None) -> str:
         """接受 WebSocket 连接
