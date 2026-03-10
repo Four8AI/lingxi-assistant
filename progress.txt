@@ -376,8 +376,13 @@ BaseAssistant.__init__
    - 前端仍然等待后端服务启动完成后再创建主窗口和初始化 WebSocket 客户端
    - 确保 WebSocket 连接只在后端服务完全启动后才尝试建立
 
+4. **确保前端退出时后端也会退出**：
+   - 在启动后端服务时设置 `killSignal: 'SIGTERM'`
+   - 添加 `process.on('exit')` 事件监听器，确保前端退出时调用 `stopBackendService()`
+
 ### 测试验证：
 - ✅ 构建成功（vite build）
 - ✅ 无 TypeScript 诊断错误
 - ✅ 启动流程正确，前端等待后端服务启动后再初始化 WebSocket
 - ✅ 当后端服务因为端口绑定失败而退出时，前端仍然认为启动成功并继续启动流程
+- ✅ 前端退出时后端也会跟着退出

@@ -52,7 +52,13 @@ class App {
         // 启动后端服务
         this.backendProcess = spawn(backendPath, [], {
           detached: false,
-          stdio: 'pipe'
+          stdio: 'pipe',
+          killSignal: 'SIGTERM'
+        })
+
+        // 确保前端退出时后端也会退出
+        process.on('exit', () => {
+          this.stopBackendService()
         })
 
         let backendStarted = false
