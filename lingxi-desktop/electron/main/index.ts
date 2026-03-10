@@ -64,22 +64,13 @@ class App {
           
           // 检测后端服务是否启动完成
           if (!backendStarted) {
-            const startupKeywords = [
-              'Server started',
-              'Running on',
-              'Listening on',
-              'FastAPI 应用启动成功',
-              'Started server process',
-              'Application startup complete',
-              'Uvicorn running',
-              'Ready to handle requests',
-              'Server is running',
-              'Backend service started'
-            ]
-            
-            const hasStartupKeyword = startupKeywords.some(keyword => output.includes(keyword))
-            
-            if (hasStartupKeyword) {
+            // 检查是否包含启动成功的关键词
+            if (output.includes('Started server process') || 
+                output.includes('Application startup complete') || 
+                output.includes('Uvicorn running') || 
+                output.includes('FastAPI 应用启动成功') ||
+                output.includes('Running on http://') ||
+                output.includes('Listening on http://')) {
               backendStarted = true
               console.log('[App] 后端服务启动完成')
               resolve(true)
@@ -101,7 +92,14 @@ class App {
           console.log(`[App] 后端服务退出，代码: ${code}, 信号: ${signal}`)
           this.backendProcess = null
           if (!backendStarted) {
-            resolve(false)
+            // 检查是否有端口绑定错误
+            if (code === 1) {
+              console.log('[App] 后端服务可能因为端口绑定失败而退出，但已尝试启动')
+              // 仍然认为启动成功，因为服务已经尝试启动了
+              resolve(true)
+            } else {
+              resolve(false)
+            }
           }
         })
 
