@@ -1,5 +1,6 @@
 import EventEmitter from 'events'
 import WebSocket from 'ws'
+import { logger } from './logger'
 import type {
   ThoughtChainData,
   StepStatusData,
@@ -25,7 +26,7 @@ export class WsClient extends EventEmitter {
     this.url = url
     // 全局错误监听，方便调试
     this.on('error', (err) => {
-      console.error('[WsClient] 错误:', err)
+      logger.error('[WsClient] 错误:', err)
     })
   }
 
@@ -35,7 +36,7 @@ export class WsClient extends EventEmitter {
     this.isManualClose = false
     const wsUrl = sessionId ? `${this.url}?sessionId=${sessionId}` : this.url
 
-    console.log(`[WsClient] 尝试连接WS服务端: ${wsUrl}`)
+    logger.log(`[WsClient] 尝试连接WS服务端: ${wsUrl}`)
 
     // 修复：连接前清理旧连接，避免冲突
     if (this.ws) {
@@ -57,7 +58,7 @@ export class WsClient extends EventEmitter {
     if (!this.ws) return
 
     this.ws.on('open', () => {
-      console.log('[WsClient] WS连接成功 ✅')
+      logger.log('[WsClient] WS连接成功 ✅')
       this.reconnectAttempts = 0
       this.emit('connected')
       this.startHeartbeat()
@@ -79,7 +80,7 @@ export class WsClient extends EventEmitter {
       if (errMsg.includes('ECONNREFUSED')) {
         const tip = `[WsClient] 连接被拒绝 ❌，请检查: 1. WS服务端是否启动 2. 5000端口是否被占用 3. 服务端地址是否正确(${this.url})`
         this.emit('error', new Error(tip))
-        console.error(tip)
+        logger.error(tip)
       } else {
         this.emit('error', new Error(`WS连接错误: ${errMsg}`))
       }
@@ -87,7 +88,7 @@ export class WsClient extends EventEmitter {
 
     this.ws.on('close', () => {
       this.stopHeartbeat()
-      console.log('[WsClient] WS连接关闭 ❌')
+      logger.log('[WsClient] WS连接关闭 ❌')
       this.emit('disconnected')
 
       if (!this.isManualClose) {
@@ -98,7 +99,7 @@ export class WsClient extends EventEmitter {
 
   private handleMessage(data: any): void {
     if (!data) {
-      console.warn('[WsClient] 收到空消息，忽略')
+      logger.error('[WsClient] 收到空消息，忽略')
       return
     }
     
@@ -165,7 +166,7 @@ export class WsClient extends EventEmitter {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.emit('reconnect_failed', '达到最大重连次数，停止重连')
-      console.error(`[WsClient] 重连失败：已尝试${this.reconnectAttempts}次，超过上限`)
+      logger.error(`[WsClient] 重连失败：已尝试${this.reconnectAttempts}次，超过上限`)
       return
     }
 
@@ -176,7 +177,7 @@ export class WsClient extends EventEmitter {
 
     this.reconnectAttempts++
     this.emit('reconnecting', this.reconnectAttempts, interval)
-    console.log(`[WsClient] 准备重连：第${this.reconnectAttempts}次，间隔${interval/1000}s`)
+    logger.log(`[WsClient] 准备重连：第${this.reconnectAttempts}次，间隔${interval/1000}s`)
 
     // 修复：重连时携带上次的sessionId
     setTimeout(() => {

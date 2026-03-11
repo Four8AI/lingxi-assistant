@@ -61,14 +61,12 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "electron/main/backend/**/*",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "electron/main/backend",
-        "to": "backend",
-        "filter": ["**/*"]
+        "to": "backend"
       }
     ],
     "win": {

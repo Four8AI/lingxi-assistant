@@ -445,3 +445,40 @@ BaseAssistant.__init__
 - ✅ 后端服务路径查找逻辑更加健壮
 - ✅ 错误信息更加详细，便于调试
 - ✅ 后端可执行文件被正确打包到 release 目录中
+
+---
+
+## 2026-03-11 - 功能增强：Electron 日志打印到运行目录的 /logs 目录
+
+### 问题：
+Electron 应用的日志没有保存到文件中，不利于调试和问题排查。
+
+### 修复内容：
+1. **创建独立的日志模块** (`lingxi-desktop/electron/main/logger.ts`)：
+   - 提取 `Logger` 类到单独的文件
+   - 导出 `Logger` 类和 `logger` 单例实例
+   - 添加公共方法：`log()`、`error()`、`info()`
+   - 修复无限递归问题，将私有方法重命名为 `_writeLog`
+
+2. **修改主文件** (`lingxi-desktop/electron/main/index.ts`)：
+   - 移除内嵌的 `Logger` 类定义
+   - 导入新的 `logger` 模块
+   - 将所有 `console.log()` 和 `console.error()` 调用替换为使用 `logger.log()` 和 `logger.error()`
+
+3. **修改 WebSocket 客户端** (`lingxi-desktop/electron/main/wsClient.ts`)：
+   - 导入 `logger` 模块
+   - 将所有 `console.log()`、`console.error()` 和 `console.warn()` 调用替换为使用 `logger` 方法
+
+4. **功能特性**：
+   - 自动创建运行目录下的 `logs` 目录
+   - 将日志文件保存到 `logs/electron.log` 和 `logs/electron-error.log`
+   - 重定向 `console.log` 和 `console.error` 到日志文件
+   - 保留原始的控制台输出
+   - 完善的错误处理机制
+
+### 测试验证：
+- ✅ 构建成功（vite build）
+- ✅ 无 TypeScript 诊断错误
+- ✅ 日志目录会自动创建在可执行文件所在目录
+- ✅ 控制台输出会同时写入日志文件
+- ✅ 错误信息会单独写入错误日志文件

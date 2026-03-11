@@ -5,6 +5,10 @@ import { WindowManager } from './windowManager'
 import { WsClient } from './wsClient'
 import { spawn, ChildProcess } from 'child_process'
 import * as path from 'path'
+import * as fs from 'fs'
+
+// 导入日志模块
+import { logger } from './logger'
 
 class App {
   private windowManager: WindowManager
@@ -13,6 +17,7 @@ class App {
   private fileManager: FileManager
   private backendProcess: ChildProcess | null = null
   private backendPort: number = 5000
+  private isQuitting: boolean = false
 
   constructor() {
     this.windowManager = new WindowManager()
@@ -47,10 +52,7 @@ class App {
           path.join(path.dirname(appPath), 'resources', 'backend', 'lingxi-backend.exe'),
           // 直接在 win-unpacked 目录中查找
           path.join(path.dirname(appPath), 'lingxi-backend.exe'),
-          path.join(path.dirname(appPath), 'resources', 'lingxi-backend.exe'),
-          // 在 app.asar 中查找
-          path.join(path.dirname(appPath), 'app.asar', 'electron', 'main', 'backend', 'lingxi-backend.exe'),
-          path.join(path.dirname(appPath), 'resources', 'app.asar', 'electron', 'main', 'backend', 'lingxi-backend.exe')
+          path.join(path.dirname(appPath), 'resources', 'lingxi-backend.exe')
         ]
         
         let backendPath = ''
@@ -58,6 +60,7 @@ class App {
         
         for (const possiblePath of possiblePaths) {
           if (fs.existsSync(possiblePath)) {
+            logger.log(`[App] 找到后端可执行文件: ${possiblePath}`)
             backendPath = possiblePath
             break
           }
@@ -69,7 +72,7 @@ class App {
           resolve(false)
           return
         }
-        console.log(`[App] 启动后端服务: ${backendPath}`)
+        logger.log(`[App] 启动后端服务: ${backendPath}`)
 
         // 启动后端服务
         this.backendProcess = spawn(backendPath, [], {
@@ -88,7 +91,7 @@ class App {
         // 监听后端服务输出
         this.backendProcess.stdout?.on('data', (data) => {
           const output = data.toString()
-          console.log(`[Backend] ${output}`)
+          logger.log(`[Backend] ${output}`)
           
           // 检测后端服务是否启动完成
           if (!backendStarted) {
@@ -104,9 +107,9 @@ class App {
             
             for (const keyword of startupKeywords) {
               if (output.includes(keyword)) {
-                console.log(`[App] 检测到启动关键词: ${keyword}`)
+                logger.log(`[App] 检测到启动关键词: ${keyword}`)
                 backendStarted = true
-                console.log('[App] 后端服务启动完成')
+                logger.log('[App] 后端服务启动完成')
                 resolve(true)
                 break
               }
@@ -115,7 +118,31 @@ class App {
         })
 
         this.backendProcess.stderr?.on('data', (data) => {
-          console.error(`[Backend] ${data.toString()}`)
+          const output = data.toString()
+          console.error(`[Backend] ${output}`)
+          
+          // 同样检测后端服务是否启动完成（因为输出可能在stderr）
+          if (!backendStarted) {
+            // 检查是否包含启动成功的关键词
+            const startupKeywords = [
+              'Started server process',
+              'Application startup complete', 
+              'Uvicorn running',
+              'FastAPI 应用启动成功',
+              'Running on http://',
+              'Listening on http://'
+            ]
+            
+            for (const keyword of startupKeywords) {
+              if (output.includes(keyword)) {
+                logger.log(`[App] 检测到启动关键词: ${keyword}`)
+                backendStarted = true
+                logger.log('[App] 后端服务启动完成')
+                resolve(true)
+                break
+              }
+            }
+          }
         })
 
         this.backendProcess.on('error', (error) => {
@@ -125,12 +152,12 @@ class App {
         })
 
         this.backendProcess.on('exit', (code, signal) => {
-          console.log(`[App] 后端服务退出，代码: ${code}, 信号: ${signal}`)
+          logger.log(`[App] 后端服务退出，代码: ${code}, 信号: ${signal}`)
           this.backendProcess = null
           if (!backendStarted) {
             // 检查是否有端口绑定错误
             if (code === 1) {
-              console.log('[App] 后端服务可能因为端口绑定失败而退出，但已尝试启动')
+              logger.log('[App] 后端服务可能因为端口绑定失败而退出，但已尝试启动')
               // 仍然认为启动成功，因为服务已经尝试启动了
               resolve(true)
             } else {
@@ -161,13 +188,13 @@ class App {
   private stopBackendService(): void {
     try {
       if (this.backendProcess) {
-        console.log('[App] 停止后端服务')
+        logger.log('[App] 停止后端服务')
         this.backendProcess.kill()
         this.backendProcess = null
-        console.log('[App] 后端服务已停止')
+        logger.log('[App] 后端服务已停止')
       }
     } catch (error) {
-      console.error('[App] 停止后端服务时出错:', error)
+      logger.error('[App] 停止后端服务时出错:', error)
     }
   }
 
@@ -415,13 +442,13 @@ class App {
     })
 
     this.wsClient.on('think_stream', (data) => {
-      console.log('[Date: ' + new Date().toLocaleString() + '] [Main] think_stream received:', JSON.stringify(data).substring(0, 200))
+      logger.log('[Date: ' + new Date().toLocaleString() + '] [Main] think_stream received:', JSON.stringify(data).substring(0, 200))
       const mainWindow = this.windowManager.getWindow()
       if (mainWindow && !mainWindow.isDestroyed()) {
-        console.log('[Date: ' + new Date().toLocaleString() + '] [Main] Sending ws:think-stream to renderer')
+        logger.log('[Date: ' + new Date().toLocaleString() + '] [Main] Sending ws:think-stream to renderer')
         this.safeSend('ws:think-stream', data)
       } else {
-        console.log('[Date: ' + new Date().toLocaleString() + '] [Main] No main window available')
+        logger.log('[Date: ' + new Date().toLocaleString() + '] [Main] No main window available')
       }
     })
 
@@ -457,19 +484,19 @@ class App {
   async start(): Promise<void> {
     app.whenReady().then(async () => {
       // 启动后端服务并等待完成
-      console.log('[App] 正在启动后端服务...')
+      logger.log('[App] 正在启动后端服务...')
       const backendStarted = await this.startBackendService()
       
       if (backendStarted) {
-        console.log('[App] 后端服务启动成功，创建主窗口')
+        logger.log('[App] 后端服务启动成功，创建主窗口')
         // 创建主窗口
         this.windowManager.createMainWindow()
         
         // 初始化WS客户端
-        console.log('[App] 初始化 WebSocket 客户端')
+        logger.log('[App] 初始化 WebSocket 客户端')
         this.initWsClient()
       } else {
-        console.error('[App] 后端服务启动失败，无法继续')
+        logger.error('[App] 后端服务启动失败，无法继续')
         // 可以选择退出应用或显示错误界面
         dialog.showErrorBox('启动失败', '后端服务启动失败，应用无法正常运行')
         app.quit()
@@ -484,18 +511,26 @@ class App {
     })
 
     app.on('before-quit', (event) => {
-      console.log('[App] before-quit 事件触发，开始清理资源')
+      if (this.isQuitting) {
+        return
+      }
+      logger.log('[App] before-quit 事件触发，开始清理资源')
       event.preventDefault()
+      this.isQuitting = true
       this.cleanupResources()
 
       setTimeout(() => {
-        console.log('[App] 资源清理完成，退出应用')
-        app.quit()
+        logger.log('[App] 资源清理完成，退出应用')
+        // 使用 process.exit() 强制退出，确保所有进程都被终止
+        process.exit(0)
       }, 1000)
     })
 
     app.on('will-quit', () => {
-      console.log('[App] will-quit 事件触发')
+      if (this.isQuitting) {
+        return
+      }
+      logger.log('[App] will-quit 事件触发')
       this.cleanupResources()
     })
 
@@ -507,36 +542,36 @@ class App {
   }
 
   private cleanupResources(): void {
-    console.log('[App] 开始清理资源')
+    logger.log('[App] 开始清理资源')
 
     try {
       if (this.wsClient) {
-        console.log('[App] 断开 WebSocket 连接')
+        logger.log('[App] 断开 WebSocket 连接')
         this.wsClient.disconnect()
         this.wsClient = null
       }
     } catch (error) {
-      console.error('[App] 清理 WebSocket 时出错:', error)
+      logger.error('[App] 清理 WebSocket 时出错:', error)
     }
 
     try {
       // 停止后端服务
       this.stopBackendService()
     } catch (error) {
-      console.error('[App] 清理后端服务时出错:', error)
+      logger.error('[App] 清理后端服务时出错:', error)
     }
 
     try {
       const mainWindow = this.windowManager.getWindow()
       if (mainWindow && !mainWindow.isDestroyed()) {
-        console.log('[App] 销毁主窗口')
+        logger.log('[App] 销毁主窗口')
         mainWindow.destroy()
       }
     } catch (error) {
-      console.error('[App] 销毁窗口时出错:', error)
+      logger.error('[App] 销毁窗口时出错:', error)
     }
 
-    console.log('[App] 资源清理完成')
+    logger.log('[App] 资源清理完成')
   }
 }
 
