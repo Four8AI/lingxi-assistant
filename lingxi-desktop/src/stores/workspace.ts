@@ -83,7 +83,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function reloadSessions() {
     try {
-      const sessions = await window.electronAPI.api.getSessions()
+      // 使用工作目录特定的 API 获取会话列表
+      const currentPath = currentWorkspace.value?.workspace
+      const sessionsResult = currentPath 
+        ? await window.electronAPI.api.getWorkspaceSessions(currentPath)
+        : await window.electronAPI.api.getSessions()
+      
+      // 处理返回结果
+      const sessions = sessionsResult.sessions || (sessionsResult as any[])
       const formattedSessions = (sessions || []).map((session: any) => ({
         id: session.session_id || session.id,
         name: session.title || session.name || '新会话',

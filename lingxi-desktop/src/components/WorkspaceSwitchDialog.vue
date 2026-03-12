@@ -107,7 +107,8 @@ const handleSwitch = async () => {
     
     if (result.success) {
       ElMessage.success('工作目录切换成功')
-      workspaceStore.loadCurrentWorkspace()
+      await workspaceStore.loadCurrentWorkspace()
+      await workspaceStore.reloadSessions()
       visible.value = false
     } else {
       ElMessage.error('切换失败：' + result.error)

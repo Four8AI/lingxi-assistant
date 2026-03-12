@@ -65,12 +65,23 @@ async function initializeApp() {
     }
 
     if (window.electronAPI?.api) {
-      console.log('[App] Loading sessions, checkpoints, and resource usage...')
-      const [sessions, checkpoints, resourceUsage] = await Promise.all([
-        window.electronAPI.api.getSessions(),
+      console.log('[App] Loading checkpoints and resource usage...')
+      const [checkpoints, resourceUsage] = await Promise.all([
         window.electronAPI.api.getCheckpoints(),
         window.electronAPI.api.getResourceUsage()
       ])
+
+      // 根据工作目录加载会话列表
+      let sessions
+      const currentWorkspace = workspaceStore.currentWorkspace
+      if (currentWorkspace?.workspace) {
+        console.log('[App] Loading sessions for workspace:', currentWorkspace.workspace)
+        sessions = await window.electronAPI.api.getWorkspaceSessions(currentWorkspace.workspace)
+        sessions = sessions.sessions || []
+      } else {
+        console.log('[App] No workspace initialized, loading all sessions')
+        sessions = await window.electronAPI.api.getSessions()
+      }
 
       // 转换后端返回的会话数据格式为前端期望的格式
       const formattedSessions = (sessions || []).map((session: any) => ({

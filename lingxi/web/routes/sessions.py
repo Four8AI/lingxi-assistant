@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from lingxi.web.state import get_assistant
@@ -39,8 +39,11 @@ class SessionHistoryResponse(BaseModel):
 
 
 @router.get("/sessions")
-async def get_sessions() -> Dict[str, Any]:
-    """获取所有会话列表
+async def get_sessions(workspace_path: Optional[str] = None) -> Dict[str, Any]:
+    """获取所有会话列表（支持按工作目录过滤）
+
+    Args:
+        workspace_path: 工作目录路径（可选）
 
     Returns:
         会话列表
@@ -50,7 +53,13 @@ async def get_sessions() -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="助手服务未初始化")
 
     try:
-        sessions = assistant.session_manager.list_all_sessions()
+        # 如果指定了工作目录路径，返回该工作目录的会话
+        if workspace_path:
+            sessions = assistant.session_manager.list_all_sessions(workspace_path)
+        else:
+            # 否则返回所有会话
+            sessions = assistant.session_manager.list_all_sessions()
+        
         return {"sessions": sessions}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取会话列表失败：{str(e)}")
@@ -72,13 +81,26 @@ async def create_session(request: CreateSessionRequest) -> Dict[str, Any]:
 
     try:
         import uuid
+        from lingxi.management.workspace_manager import get_workspace_manager
+        
         session_id = f"session_{uuid.uuid4().hex[:8]}"
         
         # 兼容 userName 和 user_name 字段
         user_name = request.userName if request.userName else (request.user_name if request.user_name else "新会话")
         
-        # 使用 create_session_by_id 方法，传入 session_id 和 user_name
-        assistant.session_manager.create_session_by_id(session_id, user_name)
+        # 获取当前工作目录路径
+        workspace_path = None
+        try:
+            workspace_manager = get_workspace_manager()
+            current_workspace = workspace_manager.get_current_workspace()
+            if current_workspace:
+                workspace_path = str(current_workspace)
+                logger.debug(f"创建会话时的工作目录：{workspace_path}")
+        except Exception as e:
+            logger.warning(f"获取工作目录失败，将不关联工作目录：{e}")
+        
+        # 使用 create_session_by_id 方法，传入 session_id、user_name 和 workspace_path
+        assistant.session_manager.create_session_by_id(session_id, user_name, workspace_path=workspace_path)
         
         return {
             "session_id": session_id,

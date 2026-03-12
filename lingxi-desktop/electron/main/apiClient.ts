@@ -75,6 +75,7 @@ export class ApiClient {
     user_name?: string
     sort_by?: string
     order?: string
+    workspace_path?: string
   }): Promise<{ sessions: Session[] }> {
     return this.client.get('/api/sessions', { params })
   }
