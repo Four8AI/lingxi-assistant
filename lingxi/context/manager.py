@@ -161,6 +161,17 @@ class ContextManager:
 
         return stats
 
+    def compress_context(self, strategy: str = None) -> Dict[str, Any]:
+        """执行上下文压缩（compress 的别名）
+
+        Args:
+            strategy: 压缩策略（hybrid/summary/sliding_window）
+
+        Returns:
+            压缩统计信息
+        """
+        return self.compress(strategy=strategy)
+
     def _compress_thinking(self) -> Dict[str, Any]:
         """压缩策略1：移除模型推理过程"""
         compressed_count = 0
@@ -379,3 +390,5 @@ class ContextManager:
             return []
 
         return self.long_term_memory.retrieve(query, top_k)
+
+# 添加 compress_context 方法到 ContextManager 类
