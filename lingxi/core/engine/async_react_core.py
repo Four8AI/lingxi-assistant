@@ -129,7 +129,8 @@ class AsyncReActCore(BaseEngine):
         self,
         messages: List[Dict[str, Any]],
         task_level: str,
-        stream: bool
+        stream: bool,
+        thinking_mode: bool = False
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """处理 LLM 响应（异步流式）
 
@@ -147,7 +148,7 @@ class AsyncReActCore(BaseEngine):
             last_thought = ""
             last_usage = None
             self.logger.debug(f"发往 LLM 的消息: {messages}")
-            async for chunk in self.async_llm_client.stream_chat(messages, task_level):
+            async for chunk in self.async_llm_client.stream_chat(messages, task_level,enable_thinking=thinking_mode):
                 if "usage" in chunk:
                     last_usage = chunk["usage"]
                 
@@ -250,15 +251,16 @@ class AsyncReActCore(BaseEngine):
         execution_id = context.execution_id
         stream = context.stream
         task_id = context.task_id
+        thinking_mode = context.thinking_mode
         
         self._build_step_messages(messages, steps)
 
-        self.logger.debug(f"生成思考和行动（stream={stream}")
+        self.logger.debug(f"生成思考和行动（stream={stream}，thinking_mode={thinking_mode}）")
 
         full_response = ""
         usage = None
         self._publish_think_start(session_id, execution_id, step, "")
-        async for response_chunk in self._process_llm_response(messages, task_level, stream):
+        async for response_chunk in self._process_llm_response(messages, task_level, stream, thinking_mode):
             chunk_type = response_chunk["type"]
             
             if chunk_type == "thought_chunk":
@@ -323,6 +325,7 @@ class AsyncReActCore(BaseEngine):
         session_id = context.session_id
         execution_id = context.execution_id
         stream = context.stream
+        thinking_mode = context.thinking_mode
         task_id = context.task_id
         
         self.logger.debug(f"异步 ReAct 处理任务：{task_info.get('task_type')} (stream={stream})")

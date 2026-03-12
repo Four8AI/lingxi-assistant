@@ -16,6 +16,7 @@ class TaskContext:
     input_tokens: int = 0
     output_tokens: int = 0
     workspace_path: Optional[str] = None
+    thinking_mode: bool = False
     
     def __post_init__(self):
         if self.session_history is None:

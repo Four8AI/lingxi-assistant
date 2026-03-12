@@ -15,13 +15,14 @@ from lingxi.core.context import TaskContext
 class AsyncLingxiAssistant(BaseAssistant):
     """异步灵犀智能助手"""
 
-    async def process_input(self, user_input: str, session_id: str = "default", stream: bool = False):
+    async def process_input(self, user_input: str, session_id: str = "default", stream: bool = False, thinking_mode: bool = False):
         """异步处理用户输入
 
         Args:
             user_input: 用户输入
             session_id: 会话 ID
             stream: 是否启用流式输出
+            thinking_mode: 是否开启思考模式
 
         Returns:
             系统响应（非流式）或异步流式响应生成器（流式）
@@ -51,7 +52,8 @@ class AsyncLingxiAssistant(BaseAssistant):
                 session_id=session_id,
                 session_history=history,
                 stream=stream,
-                workspace_path=workspace_path
+                workspace_path=workspace_path,
+                thinking_mode=thinking_mode
             )
 
             response = await engine.process(context)
@@ -69,17 +71,18 @@ class AsyncLingxiAssistant(BaseAssistant):
                 return error_generator()
             return error_response
 
-    async def stream_process_input(self, user_input: str, session_id: str = "default"):
+    async def stream_process_input(self, user_input: str, session_id: str = "default", thinking_mode: bool = False):
         """异步流式处理用户输入
 
         Args:
             user_input: 用户输入
             session_id: 会话 ID
+            thinking_mode: 是否开启思考模式
 
         Returns:
             异步流式响应生成器
         """
-        result = await self.process_input(user_input, session_id, stream=True)
+        result = await self.process_input(user_input, session_id, stream=True, thinking_mode=thinking_mode)
         async for chunk in result:
             yield chunk
 

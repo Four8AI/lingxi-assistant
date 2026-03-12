@@ -43,11 +43,32 @@ def setup_logging(config: Dict[str, Any] = None):
     
     # 创建控制台处理器（只输出 INFO 及以上级别）
     import sys
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-    console_handler.addFilter(quiet_exception_filter)
-    root_logger.addHandler(console_handler)
+    try:
+        # 尝试创建 UTF-8 编码的流
+        import io
+        stream = None
+        
+        # 检查 sys.stdout 是否可用
+        if sys.stdout and not getattr(sys.stdout, 'closed', False):
+            if hasattr(sys.stdout, 'buffer'):
+                stream = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+            else:
+                stream = sys.stdout
+        elif sys.stderr and not getattr(sys.stderr, 'closed', False):
+            if hasattr(sys.stderr, 'buffer'):
+                stream = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+            else:
+                stream = sys.stderr
+        
+        if stream:
+            console_handler = logging.StreamHandler(stream)
+            console_handler.setLevel(log_level)
+            console_handler.setFormatter(formatter)
+            console_handler.addFilter(quiet_exception_filter)
+            root_logger.addHandler(console_handler)
+    except Exception as e:
+        # 如果控制台处理器创建失败，只使用文件处理器
+        print(f"创建控制台处理器失败: {e}", file=sys.stderr)
     
     # 创建主日志文件处理器（只输出 INFO 及以上级别）
     try:

@@ -48,6 +48,9 @@ class WorkspaceManager:
         
         self.logger = logging.getLogger(__name__)
         
+        # 初始化用户目录下的全局 .lingxi 目录
+        self._initialize_global_lingxi_directory()
+        
         # 读取持久化的工作目录并初始化
         workspace_config = config.get("workspace", {})
         last_workspace = workspace_config.get("last_workspace")
@@ -61,6 +64,32 @@ class WorkspaceManager:
             self.logger.debug("未找到持久化的工作目录配置")
         
         self._initialized = True
+    
+    def _initialize_global_lingxi_directory(self):
+        """初始化用户目录下的全局 .lingxi 目录
+        
+        第一次运行时创建全局目录配置到用户目录下的.lingxi目录，配置里面包含现有的conf,data,skills目录
+        """
+        # 获取用户目录
+        user_home = Path.home()
+        global_lingxi_dir = user_home / ".lingxi"
+        
+        # 如果已存在，直接返回
+        if global_lingxi_dir.exists():
+            self.logger.debug(f"全局 .lingxi 目录已存在：{global_lingxi_dir}")
+            return
+        
+        # 创建目录结构
+        (global_lingxi_dir / "conf").mkdir(parents=True, exist_ok=True)
+        (global_lingxi_dir / "data").mkdir(parents=True, exist_ok=True)
+        (global_lingxi_dir / "skills").mkdir(parents=True, exist_ok=True)
+        
+        # 创建默认配置文件
+        config_file = global_lingxi_dir / "conf" / "config.yml"
+        if not config_file.exists():
+            self._create_default_workspace_config(config_file)
+        
+        self.logger.info(f"全局 .lingxi 目录初始化完成：{global_lingxi_dir}")
     
     def set_resources(self, sandbox=None, skill_caller=None, session_store=None, event_publisher=None):
         """设置资源引用
@@ -89,6 +118,12 @@ class WorkspaceManager:
                     self.logger.warning(f"初始化持久化工作目录失败：{e}")
             else:
                 self.logger.debug("未找到持久化的工作目录配置")
+        else:
+            # 如果当前工作目录已初始化，且 session_store 已设置，重新初始化数据库
+            if self.session_store:
+                self.logger.info("当前工作目录已初始化，重新初始化数据库")
+                # 使用全局配置中的数据库路径，传入一个虚拟的 data_dir（已废弃）
+                self._initialize_database(Path("."))
     
     def initialize(self, workspace_path: Optional[str] = None) -> Path:
         """初始化工作目录
@@ -406,45 +441,55 @@ class WorkspaceManager:
         """初始化数据库连接
         
         行为说明：
+        - 使用全局配置中的数据库路径，不再使用工作目录下的数据库
         - 如果数据库不存在：SessionManager 会自动创建新数据库并初始化表结构
         - 如果数据库已存在：保留所有历史会话数据，不做任何清空
         
         Args:
-            data_dir: 数据目录
+            data_dir: 数据目录（已废弃，使用全局配置中的路径）
         """
+        self.logger.info(f"_initialize_database 方法被调用，session_store: {self.session_store is not None}")
+        
         if not self.session_store:
             self.logger.warning("session_store 为 None，跳过数据库初始化")
             return
         
-        # 确保数据目录存在
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True, exist_ok=True)
-            self.logger.debug(f"数据目录已创建：{data_dir}")
+        # 从全局配置中获取数据库路径
+        from lingxi.utils.config import get_config
+        config = get_config()
         
-        # 更新数据库路径
-        assistant_db = data_dir / "assistant.db"
-        memory_db = data_dir / "long_term_memory.db"
+        # 使用全局配置中的数据库路径
+        lingxi_db = Path(config['database']['lingxi_db'])
+        skills_db = Path(config['database']['skills_db'])
+        
+        # 确保全局数据目录存在
+        global_data_dir = lingxi_db.parent
+        if not global_data_dir.exists():
+            global_data_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.debug(f"全局数据目录已创建：{global_data_dir}")
         
         # 检查数据库是否存在
-        db_status = "已存在" if assistant_db.exists() else "新建"
-        self.logger.info(f"工作区数据库：{db_status} - {assistant_db}")
+        db_status = "已存在" if lingxi_db.exists() else "新建"
+        self.logger.info(f"全局数据库：{db_status} - {lingxi_db}")
         
         # 使用 SessionManager 的 update_db_path 方法更新数据库路径
         # 这样可以确保 DatabaseManager 的 db_path 也被正确更新
         if hasattr(self.session_store, 'update_db_path'):
-            self.session_store.update_db_path(str(assistant_db))
-            self.logger.info(f"SessionManager 数据库路径已更新：{assistant_db}")
+            self.session_store.update_db_path(str(lingxi_db))
+            self.logger.info(f"SessionManager 数据库路径已更新为全局路径：{lingxi_db}")
         else:
             self.logger.warning("session_store 没有 update_db_path 方法，使用备用方案")
             # 备用方案：直接更新 db_path 属性（不推荐，但保持向后兼容）
             if hasattr(self.session_store, 'config'):
                 self.session_store.config['session'] = self.session_store.config.get('session', {})
-                self.session_store.config['session']['db_path'] = str(assistant_db)
-                self.session_store.config['session']['memory_db'] = str(memory_db)
-                self.session_store.db_path = str(assistant_db)
+                self.session_store.config['session']['db_path'] = str(lingxi_db)
+                self.session_store.config['session']['memory_db'] = str(lingxi_db)
+                self.session_store.db_path = str(lingxi_db)
                 self.logger.info(f"SessionManager.db_path 当前值：{self.session_store.db_path}")
+            else:
+                self.logger.error("session_store 没有 config 属性，无法更新数据库路径")
         
-        self.logger.info(f"数据库初始化完成：{assistant_db}")
+        self.logger.info(f"数据库初始化完成：{lingxi_db}")
     
     def _has_running_tasks(self) -> bool:
         """检查是否有执行中的任务

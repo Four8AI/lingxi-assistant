@@ -83,6 +83,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         session_id = context.session_id
         execution_id = context.execution_id
         stream = context.stream
+        thinking_mode = context.thinking_mode
         task_id = context.task_id
         
         checkpoint = self.session_manager.restore_checkpoint(session_id) if self.session_manager else None
@@ -123,7 +124,8 @@ class AsyncPlanReActEngine(AsyncReActCore):
                     stream=stream,
                     task_id=task_id,
                     execution_id=execution_id,
-                    workspace_path=context.workspace_path
+                    workspace_path=context.workspace_path,
+                    thinking_mode=context.thinking_mode
                 )
 
                 final_result = None
@@ -256,6 +258,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         session_id = context.session_id
         execution_id = context.execution_id
         stream = context.stream
+        thinking_mode = context.thinking_mode
         task_id = context.task_id
         plan_descriptions = []
         
@@ -266,7 +269,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
     
         self._publish_task_start(session_id, execution_id, task, task_info, task_id)
         
-        analysis = await self._analyze_task_and_plan(task, task_info, history_context, session_id, execution_id)
+        analysis = await self._analyze_task_and_plan(task, task_info, history_context, session_id, execution_id,thinking_mode)
         
         if not analysis:
             self.logger.warning("任务分析失败，降级为父类执行")
@@ -332,7 +335,8 @@ class AsyncPlanReActEngine(AsyncReActCore):
         task_info: Dict[str, Any],
         history_context: str,
         session_id: str,
-        execution_id: str
+        execution_id: str,
+        thinking_mode: bool = False
     ) -> Optional[Dict[str, Any]]:
         """分析任务并生成计划（异步）
 
@@ -362,7 +366,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         try:
             full_response = ""
             self._publish_think_start(session_id, execution_id, -1, "")
-            async for chunk in self.async_llm_client.stream_chat(messages, task_info.get("level", "simple"), enable_thinking=False):
+            async for chunk in self.async_llm_client.stream_chat(messages, task_info.get("level", "simple"), enable_thinking=thinking_mode):
                 choices = chunk.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})

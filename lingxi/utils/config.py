@@ -1,9 +1,14 @@
 import os
 import yaml
 import logging
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# 获取用户目录下的全局 .lingxi 目录
+USER_HOME = Path.home()
+GLOBAL_LINGXI_DIR = USER_HOME / ".lingxi"
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -21,12 +26,12 @@ DEFAULT_CONFIG = {
         "timeout": 30
     },
     "database": {
-        "lingxi_db": "data/lingxi.db",
-        "skills_db": "data/skills.db"
+        "lingxi_db": str(GLOBAL_LINGXI_DIR / "data" / "lingxi.db"),
+        "skills_db": str(GLOBAL_LINGXI_DIR / "data" / "skills.db")
     },
     "logging": {
         "level": "INFO",
-        "file": "logs/lingxi.log",
+        "file": str(GLOBAL_LINGXI_DIR / "logs" / "lingxi.log"),
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     },
     "session": {
@@ -34,8 +39,10 @@ DEFAULT_CONFIG = {
         "max_history": 100
     },
     "skills": {
-        "registry_path": "data/skills.db",
-        "builtin_skills": ["search", "calculator", "weather"]
+        "registry_path": str(GLOBAL_LINGXI_DIR / "data" / "skills.db"),
+        "builtin_skills": ["search", "calculator", "weather"],
+        "builtin_skills_dir": "lingxi/skills/builtin",
+        "user_skills_dir": str(GLOBAL_LINGXI_DIR / "skills")
     },
     "web": {
         "enabled": False,
@@ -203,15 +210,11 @@ def _ensure_directories(config: Dict[str, Any]):
     Args:
         config: 配置
     """
-    # 创建data目录
-    data_dir = os.path.dirname(config["database"]["lingxi_db"])
-    if data_dir and not os.path.exists(data_dir):
-        os.makedirs(data_dir, exist_ok=True)
-    
-    # 创建logs目录
-    log_dir = os.path.dirname(config["logging"]["file"])
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
+    # 确保全局 .lingxi 目录及其子目录存在
+    (GLOBAL_LINGXI_DIR / "conf").mkdir(parents=True, exist_ok=True)
+    (GLOBAL_LINGXI_DIR / "data").mkdir(parents=True, exist_ok=True)
+    (GLOBAL_LINGXI_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    (GLOBAL_LINGXI_DIR / "skills").mkdir(parents=True, exist_ok=True)
 
 def get_config() -> Dict[str, Any]:
     """获取配置

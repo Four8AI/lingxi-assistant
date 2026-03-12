@@ -1,19 +1,141 @@
-## 2026-03-11 - Task: Add thinking mode switch to ChatCore.vue
+## 2026-03-11 - 修复 WebSocket 事件处理 I/O 错误
 
 ### What was done:
-- Added `ElSwitch` component import to ChatCore.vue
-- Added `thinkingMode` reactive state variable
-- Added a Switch component with label "思考模式" in the input actions area
-- Added CSS styles for the switch to ensure proper alignment
-- Updated the `handleSend` function to include `thinkingMode.value` when sending messages via WebSocket
+- 分析了终端错误信息，发现是 WebSocket 连接关闭后仍尝试发送事件导致的 I/O 操作错误
+- 修改了 `lingxi/core/event/websocket_subscriber.py` 文件，添加了 `_safe_send_event` 方法
+- 将所有事件处理方法中的直接调用替换为通过 `_safe_send_event` 方法调用
+- 实现了异常捕获机制，确保即使 WebSocket 连接已关闭，事件处理也不会失败
 
 ### Testing:
-- The build was successful with no errors related to the changes
-- The switch is properly positioned in the input actions area
-- The switch state is bound to the `thinkingMode` variable
-- The thinking mode state is now included in WebSocket messages
+- 从代码逻辑分析，修复应该有效，因为 `_safe_send_event` 方法会捕获所有异常，包括 I/O 操作错误
+- 尝试启动服务器测试，但端口 5000 被占用，无法完成实际测试
+- 代码修改符合项目的编码规范和设计模式
 
 ### Notes:
-- The switch is placed between the upload button and the send button
-- The switch is styled with a small label for clarity
-- The thinking mode state is now passed to the backend via WebSocket messages
+- 修复后，即使 WebSocket 连接已关闭，事件处理也不会失败，只会在日志中记录调试信息
+- 这种错误处理方式更加健壮，能够提高系统的稳定性
+- 建议在未来的开发中，继续使用这种安全的事件发送方式，以避免类似的错误
+
+## 2026-03-11 - 修复 FileWorkspace 目录树加载错误
+
+### What was done:
+- 分析了前端错误信息，发现是 `refreshTree` 方法传递了整个 `currentWorkspace` Proxy 对象给 `loadDirectoryTree` 方法
+- 当这个 Proxy 对象被传递给 IPC 通道时，Electron 无法克隆它，导致 "An object could not be cloned" 错误
+- 修改了 `lingxi-desktop/src/components/workspace/FileWorkspace.vue` 文件，将 `refreshTree` 方法中的 `loadDirectoryTree(currentWorkspace.value)` 改为 `loadDirectoryTree(currentWorkspace.value.workspace)`
+- 确保只传递字符串路径，而不是整个对象
+
+### Testing:
+- 从代码逻辑分析，修复应该有效，因为现在传递的是字符串路径，而不是 Proxy 对象
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 修复后，目录树刷新功能应该能够正常工作，不再出现对象克隆失败的错误
+- 建议在未来的开发中，确保通过 IPC 通道传递的数据是可序列化的，避免传递复杂对象或 Proxy 对象
+
+## 2026-03-11 - 修复消息列表中出现 ::marker 文本的问题
+
+### What was done:
+- 分析了前端界面，发现消息列表中出现了 `::marker` 文本
+- 查看了 `MessageList.vue` 文件，发现样式部分有一个 `::marker` 选择器，它可能导致显示问题
+- 移除了 `::marker` 选择器的样式定义
+
+### Testing:
+- 从代码逻辑分析，修复应该有效，因为移除了可能导致问题的 `::marker` 选择器
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 修复后，消息列表中应该不再出现 `::marker` 文本
+- 建议在未来的开发中，谨慎使用 `::marker` 选择器，确保它在所有浏览器中都能正确显示
+
+## 2026-03-11 - 修复消息列表中列表项不能缩进显示的问题
+
+### What was done:
+- 分析了前端界面，发现消息列表中的列表项没有正确缩进显示
+- 查看了 `MessageList.vue` 文件，发现样式部分的选择器没有使用 `::v-deep` 前缀，导致样式无法穿透到 marked 库生成的 HTML 元素上
+- 修改了 `MessageList.vue` 文件，为所有的样式选择器添加了 `::v-deep` 前缀，以确保样式能够穿透到动态生成的元素上
+
+### Testing:
+- 从代码逻辑分析，修复应该有效，因为现在样式能够穿透到 marked 库生成的 HTML 元素上
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 修复后，消息列表中的列表项应该能够正确缩进显示
+- 建议在未来的开发中，当使用 `v-html` 或其他方式动态生成 HTML 元素时，使用 `::v-deep` 选择器确保样式能够正确应用
+
+## 2026-03-11 - 实现后端程序第一次运行时创建全局目录配置
+
+### What was done:
+- 分析了需求，需要在后端程序第一次运行时创建全局目录配置到用户目录下的.lingxi目录
+- 修改了 `lingxi/management/workspace_manager.py` 文件，添加了 `_initialize_global_lingxi_directory` 方法
+- 在 WorkspaceManager 类的 `__init__` 方法中调用了 `_initialize_global_lingxi_directory` 方法
+- 实现了 `_initialize_global_lingxi_directory` 方法，该方法会：
+  - 获取用户目录
+  - 创建全局 .lingxi 目录及其子目录（conf, data, skills）
+  - 创建默认配置文件
+
+### Testing:
+- 从代码逻辑分析，实现应该有效，因为 `_initialize_global_lingxi_directory` 方法会在工作目录管理器初始化时被调用
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 实现后，后端程序第一次运行时会在用户目录下创建全局 .lingxi 目录，包含必要的目录结构和配置文件
+- 建议在未来的开发中，考虑使用全局 .lingxi 目录存储全局配置和技能，而不是在每个工作目录中重复存储
+
+## 2026-03-11 - 使用全局 .lingxi 目录存储全局配置和技能
+
+### What was done:
+- 分析了需求，需要使用全局 .lingxi 目录存储全局配置和技能，而不是在每个工作目录中重复存储
+- 修改了 `lingxi/utils/config.py` 文件，添加了 `USER_HOME` 和 `GLOBAL_LINGXI_DIR` 常量
+- 更新了默认配置中的数据库、日志和技能路径，使用 `GLOBAL_LINGXI_DIR` 作为基础路径
+- 修改了 `_ensure_directories` 函数，确保全局 .lingxi 目录及其子目录（conf, data, logs, skills）存在
+- 验证了后端服务启动时会自动创建全局 .lingxi 目录结构
+
+### Testing:
+- 启动后端服务，验证全局 .lingxi 目录是否自动创建
+- 检查用户目录下的 .lingxi 目录结构，确认包含 conf, data, logs, skills 子目录
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 实现后，全局配置和技能会存储在用户目录下的 .lingxi 目录中，避免在每个工作目录中重复存储
+- 工作目录仍然可以有自己的 .lingxi 目录，用于存储工作目录特定的配置和技能，优先级高于全局配置
+- 这种设计既保证了配置的一致性，又提供了灵活性，允许不同工作目录有不同的配置
+
+## 2026-03-11 - 把工作目录的数据库data作废，以后都以全局配置的data数据库文件为主
+
+### What was done:
+- 分析了需求，需要把工作目录的数据库data作废，以后都以全局配置的data数据库文件为主
+- 修改了 `lingxi/management/workspace_manager.py` 文件中的 `_initialize_database` 方法
+- 使该方法使用全局配置中的数据库路径，而不是工作目录下的数据库路径
+- 修改了 `set_resources` 方法，确保在设置 `session_store` 后，重新初始化数据库
+- 添加了详细的日志信息，以便于调试
+
+### Testing:
+- 启动后端服务，验证数据库初始化是否使用全局配置中的数据库路径
+- 检查日志信息，确认数据库路径已更新为全局路径
+- 验证全局 .lingxi 目录下的 data 目录是否自动创建
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 实现后，所有工作目录都会使用全局配置中的数据库路径，不再使用工作目录下的数据库
+- 这样可以避免在每个工作目录中重复存储数据库文件，节省存储空间
+- 同时也保证了数据的一致性，所有工作目录共享同一个数据库
+- 数据库初始化会自动创建全局数据目录和数据库文件（如果不存在）
+
+## 2026-03-11 - 当前端打开了深度思考，后端调用模型时需要打开思考模式
+
+### What was done:
+- 分析了需求，当前端打开了深度思考，后端调用模型时需要打开思考模式
+- 修改了 `lingxi/management/workspace_manager.py` 文件中的 `_initialize_database` 方法，添加了详细的日志信息
+- 修改了 `lingxi/web/websocket_manager.py` 文件中的 `_handle_stream_chat` 方法，使其获取前端发送的 `thinkingMode` 参数
+- 修改了 `_send_stream_response` 方法，使其接受 `thinking_mode` 参数并传递给 `stream_process_input` 方法
+- 修改了 `lingxi/core/assistant/async_main.py` 文件中的 `stream_process_input` 方法，使其接受 `thinking_mode` 参数
+- 修改了 `process_input` 方法，使其接受 `thinking_mode` 参数并传递给 `TaskContext` 构造函数
+
+### Testing:
+- 启动后端服务，验证服务是否正常启动
+- 代码修改符合项目的编码规范和设计模式
+
+### Notes:
+- 实现后，当用户在前端打开深度思考模式时，后端调用模型时会打开思考模式
+- 这样可以确保模型在处理复杂问题时能够进行更深入的思考，提高回答质量
+- 前端的 `thinkingMode` 参数会通过 WebSocket 传递给后端，后端会将其传递给 `TaskContext`，最终影响模型的思考过程

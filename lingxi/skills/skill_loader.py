@@ -81,13 +81,17 @@ class SkillLoader:
         """
         skill_dirs = []
 
+        self.logger.info(f"开始扫描技能目录，内置技能目录: {self.builtin_skills_dir}, 用户技能目录: {self.user_skills_dir}")
+
         # 扫描内置技能目录
         for skills_path in [self.builtin_skills_dir, self.user_skills_dir]:
             try:
                 skills_path_obj = Path(skills_path)
+                self.logger.info(f"扫描技能目录: {skills_path}, 存在: {skills_path_obj.exists()}")
                 if not skills_path_obj.exists():
                     continue
 
+                self.logger.info(f"技能目录 {skills_path} 存在，开始扫描子目录")
                 for item in skills_path_obj.iterdir():
                     # 支持两种格式：
                     # 1. 以Skill结尾的目录（传统格式，如PdfParserSkill）
@@ -96,18 +100,19 @@ class SkillLoader:
                         if item.name.endswith("Skill"):
                             skill_dirs.append(str(item))
                             skill_type = "内置" if skills_path == self.builtin_skills_dir else "用户"
-                            self.logger.debug(f"发现技能目录（{skill_type}，传统格式）: {item.name}")
+                            self.logger.info(f"发现技能目录（{skill_type}，传统格式）: {item.name}")
                         else:
                             # 检查是否包含SKILL.md文件
                             skill_md_path = item / "SKILL.md"
                             if skill_md_path.exists():
                                 skill_dirs.append(str(item))
                                 skill_type = "内置" if skills_path == self.builtin_skills_dir else "用户"
-                                self.logger.debug(f"发现技能目录（{skill_type}，MCP格式）: {item.name}")
+                                self.logger.info(f"发现技能目录（{skill_type}，MCP格式）: {item.name}")
 
             except Exception as e:
                 self.logger.error(f"扫描技能目录失败 {skills_path}: {e}")
 
+        self.logger.info(f"技能目录扫描完成，发现 {len(skill_dirs)} 个技能目录")
         return skill_dirs
 
     def _load_skill_config(self, skill_dir: str) -> Optional[Dict[str, Any]]:

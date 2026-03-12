@@ -177,6 +177,8 @@ class WebSocketManager:
         message = data.get('content', '')
         # 兼容前端发送的 sessionId 和 session_id 字段
         session_id = data.get('sessionId') or data.get('session_id', connection.session_id)
+        # 获取前端发送的 thinkingMode 参数
+        thinking_mode = data.get('thinkingMode', False)
 
         if not message:
             await self._send_error(connection, "消息内容不能为空")
@@ -186,7 +188,7 @@ class WebSocketManager:
         self.session_connections.setdefault(session_id, set()).add(connection.connection_id)
 
         try:
-            await self._send_stream_response(connection, message, session_id)
+            await self._send_stream_response(connection, message, session_id, thinking_mode)
         except Exception as e:
             logger.error(f"处理流式聊天失败：{e}", exc_info=True)
             await self._send_error(connection, f"处理流式聊天失败：{str(e)}")
@@ -445,7 +447,7 @@ class WebSocketManager:
         if not success:
             logger.debug(f"发送聊天响应失败，连接可能已断开")
 
-    async def _send_stream_response(self, connection: WebSocketConnection, message: str, session_id: str):
+    async def _send_stream_response(self, connection: WebSocketConnection, message: str, session_id: str, thinking_mode: bool = False):
         """发送流式响应
 
         使用完全异步的助手类，直接 await 异步生成器：
@@ -457,11 +459,12 @@ class WebSocketManager:
             connection: WebSocket 连接
             message: 消息内容
             session_id: 会话 ID
+            thinking_mode: 是否开启思考模式
         """
         try:
             # 调用异步助手，获取异步生成器
             # 注意：stream_process_input 是异步生成器函数，直接返回异步生成器对象
-            response_generator = self.assistant.stream_process_input(message, session_id)
+            response_generator = self.assistant.stream_process_input(message, session_id, thinking_mode)
             
             # 遍历异步生成器并发送消息
             async for chunk in response_generator:
