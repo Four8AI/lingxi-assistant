@@ -15,7 +15,7 @@ class LLMClient:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], workspace_path: str = None):
         # 防止重复初始化
         if hasattr(self, '_initialized'):
             return
@@ -24,6 +24,7 @@ class LLMClient:
 
         Args:
             config: 系统配置
+            workspace_path: 工作目录路径（用于加载 SOUL）
         """
         self.config = config
         self.llm_config = config.get("llm", {})
@@ -43,6 +44,17 @@ class LLMClient:
 
         # 存储最近的 Token 使用信息
         self.last_usage = None
+
+        # 初始化 SOUL 注入器
+        self.soul_injector = None
+        if workspace_path:
+            try:
+                from lingxi.core.soul import SoulInjector
+                self.soul_injector = SoulInjector(workspace_path)
+                self.soul_injector.load()
+                self.logger.debug(f"SOUL 注入器已初始化，工作目录：{workspace_path}")
+            except Exception as e:
+                self.logger.warning(f"SOUL 加载失败：{e}")
 
         self._init_client()
 
@@ -294,9 +306,15 @@ class LLMClient:
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
-        # 构造消息
+        # 构造消息（注入 SOUL）
+        base_system_prompt = "你是灵犀智能助手，一个聪明、友好的 AI 助手。"
+        if self.soul_injector and self.soul_injector.soul_data:
+            system_prompt = self.soul_injector.build_system_prompt(base_system_prompt)
+        else:
+            system_prompt = base_system_prompt
+        
         messages = [
-            {"role": "system", "content": "你是灵犀智能助手，一个聪明、友好的AI助手。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
         
@@ -361,9 +379,15 @@ class LLMClient:
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
-        # 构造消息
+        # 构造消息（注入 SOUL）
+        base_system_prompt = "你是灵犀智能助手，一个聪明、友好的 AI 助手。"
+        if self.soul_injector and self.soul_injector.soul_data:
+            system_prompt = self.soul_injector.build_system_prompt(base_system_prompt)
+        else:
+            system_prompt = base_system_prompt
+        
         messages = [
-            {"role": "system", "content": "你是灵犀智能助手，一个聪明、友好的AI助手。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
         
@@ -428,9 +452,15 @@ class LLMClient:
         model = self.select_model(task_level) if task_level else self.model
         model_config = self.get_model_config(task_level) if task_level else {}
 
-        # 构造消息
+        # 构造消息（注入 SOUL）
+        base_system_prompt = "你是灵犀智能助手，一个聪明、友好的 AI 助手。"
+        if self.soul_injector and self.soul_injector.soul_data:
+            system_prompt = self.soul_injector.build_system_prompt(base_system_prompt)
+        else:
+            system_prompt = base_system_prompt
+        
         messages = [
-            {"role": "system", "content": "你是灵犀智能助手，一个聪明、友好的AI助手。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
         

@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, List, Optional, Any, Union
 from lingxi.core.llm.llm_client import LLMClient
+from lingxi.core.soul import SoulInjector
 from lingxi.core.prompts.prompts import PromptTemplates
 from lingxi.core.context import TaskContext
 
@@ -20,6 +21,12 @@ class DirectEngine:
 
         direct_config = config.get("execution_mode", {}).get("trivial", {})
         self.max_tokens = direct_config.get("max_tokens", 1000)
+        
+        # 初始化 SOUL 注入器
+        workspace_path = config.get("workspace", {}).get("default_path", "./workspace")
+        self.soul_injector = SoulInjector(workspace_path)
+        self.soul_injector.load()
+        self.logger.debug("DirectEngine: SOUL 注入器已初始化")
 
         self.logger.debug("初始化直接响应引擎")
 

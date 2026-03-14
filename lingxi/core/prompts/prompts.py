@@ -81,7 +81,7 @@ class PromptTemplates:
 
         context = ""
         for msg in session_history[-max_count:]:
-            context += f"用户:{msg.get("user_input", "")}\n助手:{msg.get("result", "")}\n"
+            context += f"用户:{msg.get('user_input', '')}\n助手:{msg.get('result', '')}\n"
         return context
 
     @staticmethod
@@ -122,13 +122,13 @@ class PromptTemplates:
                 if is_last_step:
                     # 最后一步完整显示
                     params_str = ', '.join([f"{k}={v}" for k, v in action_input.items()])
-                    formatted += f"行动: {step.get('action', '')} - {params_str.replace('\n', '\\n')}\n"
-                else:
+                    params_str_escaped = params_str_escaped
+                    formatted += f"行动：{step.get('action', '')} - {params_str_escaped}\n"
                     # 之前步骤截断显示
                     params_str = ', '.join([f"{k}={v}" for k, v in action_input.items()])
                     if len(params_str) > max_prev_length:
                         params_str = params_str[:max_prev_length] + '...'
-                    formatted += f"行动: {step.get('action', '')} - {params_str.replace('\n', '\\n')}\n"
+                    formatted += f"行动: {step.get('action', '')} - {params_str_escaped}\n"
             else:
                 if is_last_step:
                     # 最后一步完整显示
@@ -147,7 +147,8 @@ class PromptTemplates:
                     observation = observation[:max_prev_length] + ('...' if len(observation) > max_prev_length else '')
                 else:
                     observation = observation
-                formatted += f"观察: {observation.replace('\n', '\\n')}\n"
+                observation_escaped = observation.replace('\n', '\\n')
+                formatted += f"观察: {observation_escaped}\n"
             formatted += "\n"
         return formatted
 
@@ -250,7 +251,7 @@ Shell类型: {system_info['shell_type']}
 
 任务类型: {task_info.get('level', task_info.get('task_type', '未知'))}
 任务描述: {task_info.get('reason', task_info.get('description', '无'))}
-{task_plan if task_plan else ""}
+{task_plan if task_plan else ''}
 
 可用行动:
 {skills_list}
@@ -406,5 +407,6 @@ Shell类型: {system_info['shell_type']}
         """
         res_str=''
         for index,step in enumerate(task_plan):
-            res_str += f"{index+1}. {step.strip().replace("\n", " ")} "
-        return f"任务计划: {res_str if len(task_plan) > 1 else ""}" 
+            step_clean = step.strip().replace('\n', ' ')
+            res_str += f"{index+1}. {step_clean} "
+        return f"任务计划: {res_str if len(task_plan) > 1 else ''}" 

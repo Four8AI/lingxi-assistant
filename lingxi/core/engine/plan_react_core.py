@@ -381,8 +381,8 @@ class PlanReActCore(ReActCore):
 
         return self.llm_client.complete(prompt, task_level="simple")
 
-    def _execute_task_stream(self, context: TaskContext) -> Generator[Dict[str, Any], None, None]:
-        """执行任务（流式）- 统一入口，智能路由
+    async def _execute_task_stream(self, context: TaskContext) -> Generator[Dict[str, Any], None, None]:
+        """执行任务（流式，支持子代理）- 统一入口，智能路由
 
         Args:
             context: 任务上下文对象
@@ -390,6 +390,13 @@ class PlanReActCore(ReActCore):
         Yields:
             流式响应块
         """
+        # 检测是否需要子代理（异步检测）
+        if self.subagent_scheduler and self._should_use_subagent(context.user_input, context.task_info):
+            self.logger.info("PlanReActCore 检测到需要子代理，使用并行执行")
+            async for chunk in self._execute_with_subagents_stream(context):
+                yield chunk
+            return
+        
         task = context.user_input
         task_info = context.task_info
         history = context.session_history
@@ -482,3 +489,67 @@ class PlanReActCore(ReActCore):
             self._publish_task_end(final_result, context)
             if stream:
                 yield {"type": "task_finish", "result": final_result}
+
+    
+    async def _execute_with_subagents_stream(self, context: TaskContext):
+        """
+        使用子代理执行任务（流式）
+        
+        Args:
+            context: 任务上下文对象
+        
+        Yields:
+            流式响应块
+        """
+        task = context.user_input
+        session_id = context.session_id
+        execution_id = context.execution_id
+        workspace_path = context.workspace_path
+        
+        # 分解任务
+        subtasks = self._decompose_task(task, context.task_info)
+        
+        self.logger.info(f"任务已分解为 {len(subtasks)} 个子任务")
+        
+        # 发布任务分解事件
+        self.event_publisher.publish(
+            event_type="task_decomposed",
+            session_id=session_id,
+            execution_id=execution_id,
+            original_task=task,
+            subtasks=subtasks,
+            subagent_count=len(subtasks)
+        )
+        
+        # 发布思考：任务分解
+        yield {
+            "type": "thought_chunk",
+            "content": f"检测到复杂任务，已分解为 {len(subtasks)} 个子任务并行执行...\n"
+        }
+        
+        # 并行执行子任务
+        results = await self.subagent_scheduler.parallel_execute(
+            tasks=subtasks,
+            workspace_path=workspace_path,
+            context=context.task_info
+        )
+        
+        # 聚合结果
+        aggregated_result = self._aggregate_subagent_results(results)
+        
+        # 发布聚合事件
+        self.event_publisher.publish(
+            event_type="subagents_completed",
+            session_id=session_id,
+            execution_id=execution_id,
+            results=[r.to_dict() if hasattr(r, 'to_dict') else r for r in results],
+            aggregated_result=aggregated_result
+        )
+        
+        # 发布最终结果
+        yield {
+            "type": "task_finish",
+            "result": aggregated_result
+        }
+
+

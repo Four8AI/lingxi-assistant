@@ -12,6 +12,7 @@ from lingxi.core.session.database_manager import DatabaseManager
 from lingxi.core.session.task_manager import TaskManager, task_to_dict, dict_to_task
 from lingxi.core.session.step_manager import StepManager, step_to_dict, dict_to_step
 from lingxi.core.session.workspace_registry import WorkspaceRegistry
+from lingxi.core.soul import SoulInjector
 
 
 def session_to_dict(session: Session) -> dict:
@@ -75,6 +76,13 @@ class SessionManager:
         self.workspace_registry = WorkspaceRegistry(self.db_path)
 
         self.context_manager = ContextManager(config, session_id)
+        
+        # 初始化 SOUL 注入器
+        self.workspace_path = config.get("workspace", {}).get("default_path", "./workspace")
+        self.soul_injector = SoulInjector(self.workspace_path)
+        self.soul_injector.load()  # 加载 SOUL.md
+        self.logger.debug(f"SOUL 注入器已初始化，工作目录：{self.workspace_path}")
+        
         self._initialized = True
 
     def update_db_path(self, new_db_path: str):
@@ -96,6 +104,17 @@ class SessionManager:
             self.db_manager._init_db()
         
         self.logger.info(f"数据库路径已更新：{new_db_path}")
+
+    def switch_workspace(self, workspace_path: str):
+        """切换工作目录并重新加载 SOUL
+
+        Args:
+            workspace_path: 新的工作目录路径
+        """
+        self.workspace_path = workspace_path
+        self.soul_injector = SoulInjector(workspace_path)
+        self.soul_injector.load()
+        self.logger.info(f"工作目录已切换到：{workspace_path}，SOUL 已重新加载")
 
     def get_history(self, session_id: str, max_turns: int = None, compress: bool = False) -> List[Dict[str, Any]]:
         """获取会话历史
@@ -709,14 +728,15 @@ class SessionManager:
 
         return deleted
 
-    def create_session(self, user_name: str = "default") -> str:
+    def create_session(self, user_name: str = "default", system_prompt: str = None) -> str:
         """创建新会话
 
         Args:
             user_name: 用户名
+            system_prompt: 基础系统提示词（可选）
 
         Returns:
-            会话ID
+            会话 ID
         """
         import uuid
         session_id = str(uuid.uuid4())
@@ -727,30 +747,19 @@ class SessionManager:
         """
         self.db_manager.execute_sql(sql, (session_id, user_name))
 
+        # 注入 SOUL 到会话
+        if self.soul_injector.soul_data:
+            if system_prompt is None:
+                system_prompt = f"你是{self.soul_injector.soul_data.get('identity', {}).get('name', '灵犀')}智能助手。"
+            final_system_prompt = self.soul_injector.build_system_prompt(system_prompt)
+            # 将会话的系统提示词存储到上下文管理器
+            if hasattr(self, 'context_manager'):
+                self.context_manager.add_context_item("system", final_system_prompt)
+            self.logger.debug(f"SOUL 已注入到会话：{session_id}")
+
         self.logger.debug(f"会话已创建，session_id: {session_id}, user_name: {user_name}")
         return session_id
 
-    def create_session_by_id(self, session_id: str, user_name: str = "default", title: str = "新会话") -> str:
-        """使用指定ID创建会话
-
-        Args:
-            session_id: 会话ID
-            user_name: 用户名
-            title: 会话标题
-
-        Returns:
-            会话ID
-        """
-        sql = """
-            INSERT OR REPLACE INTO sessions (session_id, user_name, title, total_tokens, created_at, updated_at)
-            VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """
-        self.db_manager.execute_sql(sql, (session_id, user_name, title))
-
-        self.logger.debug(f"会话已创建，session_id: {session_id}, user_name: {user_name}, title: {title}")
-        return session_id
-
-    @property
     def transaction(self):
         """事务上下文管理器（委托给数据库管理器）"""
         return self.db_manager.transaction

@@ -4,8 +4,10 @@ import json
 import uuid
 import threading
 import asyncio
+import re
 from typing import Dict, List, Optional, Any, Union, Generator, TYPE_CHECKING
 from lingxi.core.llm.llm_client import LLMClient
+from lingxi.core.soul import SoulInjector
 from lingxi.core.skill_caller import SkillCaller
 from lingxi.core.prompts.prompts import PromptTemplates
 from lingxi.core.event import global_event_publisher
@@ -37,12 +39,24 @@ class BaseEngine:
         self.llm_client = LLMClient(config)
         self.logger = logging.getLogger(__name__)
         
+        # 初始化 SOUL 注入器
+        workspace_path = config.get("workspace", {}).get("default_path", "./workspace")
+        self.soul_injector = SoulInjector(workspace_path)
+        self.soul_injector.load()
+        self.logger.debug("BaseEngine: SOUL 注入器已初始化")
+        
         # 初始化确认管理器（V4.0新增）
         security_config = config.get("security", {})
         self.confirmation_manager = ConfirmationManager(
             timeout=security_config.get("confirmation_timeout", 60),
             auto_reject_timeout=security_config.get("auto_reject_timeout", True)
         )
+        
+        # 子代理调度器（从 skill_caller 获取）
+        self.subagent_scheduler = None
+        if hasattr(skill_caller, "subagent_scheduler"):
+            self.subagent_scheduler = skill_caller.subagent_scheduler
+            self.logger.debug("子代理调度器已启用")
 
     def process(self, context: TaskContext) -> Union[str, Generator[Dict[str, Any], None, None]]:
         """处理用户输入
@@ -295,6 +309,140 @@ class BaseEngine:
         
         return messages
 
+    def _inject_soul_to_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """注入 SOUL 到消息列表
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            注入后的消息列表
+        """
+        if not hasattr(self, 'soul_injector') or not self.soul_injector.soul_data:
+            return messages
+
+    def _should_use_subagent(self, task: str, context: dict = None) -> bool:
+        """
+        检测是否需要使用子代理
+        
+        Args:
+            task: 任务描述
+            context: 上下文
+        
+        Returns:
+            是否需要子代理
+        """
+        # 1. 检测关键词（并行/多任务意图）
+        parallel_keywords = [
+            "并行", "同时", "一起", "分别", "各自",
+            "多个", "几个", "每个",
+            "分析...和...", "对比...和...",
+            "第一部分...第二部分...", "首先...然后..."
+        ]
+        
+        for keyword in parallel_keywords:
+            if keyword in task:
+                self.logger.debug(f"检测到并行意图关键词：{keyword}")
+                return True
+        
+        # 2. 检测任务复杂度（长度超过阈值）
+        if len(task) > 200:
+            self.logger.debug("任务较长，可能需要分解")
+            return True
+        
+        # 3. 检测上下文中的子代理请求
+        if context:
+            if isinstance(context, dict):
+                if context.get("use_subagent") is True:
+                    return True
+                if context.get("parallel") is True:
+                    return True
+        
+        # 4. 检测任务列表格式（使用换行符检测）
+        if chr(10) in task:  # chr(10) is newline character
+            lines = [l.strip() for l in task.split(chr(10)) if l.strip()]
+            if len(lines) > 1:
+                self.logger.debug(f"检测到多行任务，共{len(lines)}行")
+                return True
+        
+        return False
+    
+    def _decompose_task(self, task: str, context: dict = None) -> List[str]:
+        """
+        分解任务为子任务
+        
+        Args:
+            task: 原始任务
+            context: 上下文
+        
+        Returns:
+            子任务列表
+        """
+        # 1. 按换行符分解
+        if chr(10) in task:
+            subtasks = [l.strip() for l in task.split(chr(10)) if l.strip()]
+            if len(subtasks) > 1:
+                return subtasks
+        
+        # 2. 按逗号/分号分解
+        if ',' in task or '，' in task:
+            subtasks = [t.strip() for t in re.split(r'[,，]', task) if t.strip()]
+            if len(subtasks) > 1:
+                return subtasks
+        
+        # 3. 按"和"、"与"分解
+        if '和' in task or '与' in task:
+            subtasks = [t.strip() for t in re.split(r'[和与]', task) if t.strip()]
+            if len(subtasks) > 1:
+                return subtasks
+        
+        # 4. 默认：不分解，返回原任务
+        return [task]
+    
+    def _aggregate_subagent_results(self, results: List) -> str:
+        """
+        聚合子代理结果
+        
+        Args:
+            results: 子代理结果列表
+        
+        Returns:
+            聚合后的结果字符串
+        """
+        aggregated = []
+        
+        for i, result in enumerate(results, 1):
+            if hasattr(result, 'result'):
+                aggregated.append(f"【子任务{i}】" + chr(10) + str(result.result))
+            elif isinstance(result, dict) and 'result' in result:
+                aggregated.append(f"【子任务{i}】" + chr(10) + result['result'])
+            else:
+                aggregated.append(f"【子任务{i}】" + chr(10) + str(result))
+        
+        return chr(10) + chr(10).join(aggregated)
+
+
+        # 构建 SOUL 系统提示词
+        soul_prompt = self.soul_injector.build_system_prompt("")
+        
+        # 查找现有的系统消息
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                # 在现有系统消息后追加 SOUL 内容
+                original_content = msg.get("content", "")
+                messages[i]["content"] = f"{original_content}\n\n{soul_prompt}"
+                self.logger.debug(f"SOUL 已注入到系统消息 (索引 {i})")
+                return messages
+        
+        # 如果没有系统消息，在开头添加
+        messages.insert(0, {
+            "role": "system",
+            "content": soul_prompt
+        })
+        self.logger.debug("SOUL 已作为新系统消息添加")
+        return messages
+
+
     def _get_json_schema(self) -> Dict[str, Any]:
         """获取JSON Schema
 
@@ -530,6 +678,9 @@ class BaseEngine:
         Returns:
             流式响应生成器
         """
+        # 注入 SOUL 到消息列表
+        messages = self._inject_soul_to_messages(messages)
+
         # 添加调试日志
         self.logger.debug(f"处理LLM响应，消息数量: {len(messages)}")
         for i, msg in enumerate(messages):
@@ -755,3 +906,110 @@ class BaseEngine:
                 user_input=task,
                 task_level=task_info.get("level", "none")
         )
+    
+    async def execute_task(self, task, session_id, context=None):
+        """
+        执行任务（支持子代理）
+        
+        Args:
+            task: 任务描述
+            session_id: 会话 ID
+            context: 上下文信息
+        
+        Returns:
+            执行结果
+        """
+        # 检测是否需要子代理
+        if self.subagent_scheduler and self._should_use_subagent(task, context):
+            self.logger.info("检测到需要子代理，使用并行执行")
+            return await self._execute_with_subagents(task, session_id, context)
+        
+        # 原有执行流程（降级为直接执行）
+        return await self._execute_direct(task, session_id, context)
+    
+    async def _execute_with_subagents(self, task: str, session_id: str, context: dict):
+        """
+        使用子代理执行任务
+        
+        Args:
+            task: 原始任务
+            session_id: 会话 ID
+            context: 上下文信息
+        
+        Returns:
+            聚合后的结果
+        """
+        # 分解任务
+        subtasks = self._decompose_task(task, context)
+        
+        self.logger.info(f"任务已分解为 {len(subtasks)} 个子任务")
+        
+        # 发布任务分解事件
+        if self.event_publisher:
+            self.event_publisher.publish(
+                event_type="task_decomposed",
+                session_id=session_id,
+                original_task=task,
+                subtasks=subtasks,
+                subagent_count=len(subtasks)
+            )
+        
+        # 并行执行子任务
+        workspace_path = context.get("workspace_path") if context else None
+        
+        results = await self.subagent_scheduler.parallel_execute(
+            tasks=subtasks,
+            workspace_path=workspace_path,
+            context=context
+        )
+        
+        # 聚合结果
+        aggregated_result = self._aggregate_subagent_results(results)
+        
+        # 发布聚合事件
+        if self.event_publisher:
+            self.event_publisher.publish(
+                event_type="subagents_completed",
+                session_id=session_id,
+                results=[r.to_dict() if hasattr(r, 'to_dict') else r for r in results],
+                aggregated_result=aggregated_result
+            )
+        
+        return aggregated_result
+    
+    async def _execute_direct(self, task: str, session_id: str, context: dict = None):
+        """
+        直接执行任务（不使用子代理）
+        
+        Args:
+            task: 任务描述
+            session_id: 会话 ID
+            context: 上下文信息
+        
+        Returns:
+            执行结果
+        """
+        # 创建 TaskContext 对象
+        task_info = context.get("task_info", {"level": "simple"}) if context else {"level": "simple"}
+        session_history = context.get("session_history", []) if context else []
+        stream = context.get("stream", False) if context else False
+        workspace_path = context.get("workspace_path") if context else None
+        
+        task_context = TaskContext(
+            user_input=task,
+            task_info=task_info,
+            session_id=session_id,
+            session_history=session_history,
+            stream=stream,
+            workspace_path=workspace_path
+        )
+        
+        # 调用 _execute_task_stream 执行
+        result = ""
+        for chunk in self._execute_task_stream(task_context):
+            if chunk.get("type") == "task_finish":
+                result = chunk.get("result", "")
+                break
+        
+        return result
+
