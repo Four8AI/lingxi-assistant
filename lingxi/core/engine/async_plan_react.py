@@ -8,10 +8,12 @@ import uuid
 import logging
 from typing import Dict, List, Any, Union, Optional
 from collections.abc import AsyncGenerator
-from lingxi.core.engine.plan_react_core import PlanReActCore
 from lingxi.core.context import TaskContext
 from lingxi.core.engine.async_react_core import AsyncReActCore
 from lingxi.core.prompts.prompts import PromptTemplates
+
+# PlanReActCore 已废弃 - 2026-03-15
+# from lingxi.core.engine.plan_react_core import PlanReActCore
 
 
 class AsyncPlanReActEngine(AsyncReActCore):
@@ -265,7 +267,7 @@ class AsyncPlanReActEngine(AsyncReActCore):
         task_level = task_info.get("level", "simple")
         history_context = self._build_history_context(history)
 
-        self.logger.debug(f"异步 PlanReActCore 处理任务：level={task_level}, task={task}")
+        self.logger.debug(f"异步 Plan+ReAct 引擎处理任务：level={task_level}, task={task}")
     
         self._publish_task_start(session_id, execution_id, task, task_info, task_id)
         

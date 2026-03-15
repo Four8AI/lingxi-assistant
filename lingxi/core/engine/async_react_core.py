@@ -7,14 +7,13 @@ import logging
 import time
 from typing import Dict, List, Optional, Any, Union
 from collections.abc import AsyncGenerator
-from lingxi.core.engine.base import BaseEngine
 from lingxi.core.prompts.prompts import PromptTemplates
 from lingxi.core.event import global_event_publisher
 from lingxi.core.context import TaskContext
 from lingxi.core.llm.async_llm_client import AsyncLLMClient
 
 
-class AsyncReActCore(BaseEngine):
+class AsyncReActCore:
     """异步 ReAct 引擎核心逻辑"""
 
     def __init__(self, config: Dict[str, Any], skill_caller=None, session_manager=None, websocket_manager=None):
@@ -26,7 +25,10 @@ class AsyncReActCore(BaseEngine):
             session_manager: 会话管理器
             websocket_manager: WebSocket 管理器
         """
-        super().__init__(config, skill_caller, session_manager, websocket_manager)
+        self.config = config
+        self.skill_caller = skill_caller
+        self.session_manager = session_manager
+        self.websocket_manager = websocket_manager
 
         self.max_steps = int(config.get("engine", {}).get("max_steps", 10))
         self.timeout = int(config.get("engine", {}).get("timeout", 60))
