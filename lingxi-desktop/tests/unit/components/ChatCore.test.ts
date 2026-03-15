@@ -3,6 +3,12 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import ChatCore from '@/components/ChatCore.vue'
 import { useAppStore } from '@/stores/app'
+import { useSessionStore } from '@/stores/session'
+import { useChatStore } from '@/stores/chat'
+import { sendMessage } from '@/api/chat'
+import { createSession } from '@/api/session'
+import { uploadFile } from '@/api/file'
+import { electronAPI } from '@/utils/electron'
 
 describe('ChatCore Component', () => {
   let pinia: ReturnType<typeof createPinia>
@@ -97,10 +103,11 @@ describe('ChatCore Component', () => {
   it('should handle send with valid input', async () => {
     const appStore = useAppStore()
     appStore.setCurrentSession('session-123')
-    window.electronAPI.api.createSession = vi.fn().mockResolvedValue({ session_id: 'session-123' })
-    window.electronAPI.ws = {
+    
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined)
-    }
+    }))
     
     const wrapper = mount(ChatCore, {
       global: {
@@ -114,20 +121,37 @@ describe('ChatCore Component', () => {
     vm.inputText = 'Test message'
     await vm.handleSend()
     
-    expect(window.electronAPI.ws.sendMessage).toHaveBeenCalledWith(
-      'Test message',
-      'session-123',
-      false
-    )
+    expect(sendMessage).toHaveBeenCalledWith({
+      content: 'Test message',
+      session_id: 'session-123',
+      stream: true
+    })
   })
 
   it('should create new session if none exists when sending', async () => {
     const appStore = useAppStore()
+    const sessionStore = useSessionStore()
     appStore.setCurrentSession(null)
-    window.electronAPI.api.createSession = vi.fn().mockResolvedValue({ session_id: 'new-session' })
-    window.electronAPI.ws = {
+    
+    // Mock session store methods
+    vi.spyOn(sessionStore, 'createNewSession').mockResolvedValue({
+      id: 'new-session',
+      name: '新会话',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    })
+    
+    vi.spyOn(sessionStore, 'sessions', 'get').mockReturnValue([{
+      id: 'new-session',
+      name: '新会话',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }])
+    
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined)
-    }
+    }))
     
     const wrapper = mount(ChatCore, {
       global: {
@@ -141,17 +165,18 @@ describe('ChatCore Component', () => {
     vm.inputText = 'Test message'
     await vm.handleSend()
     
-    expect(window.electronAPI.api.createSession).toHaveBeenCalledWith('新会话')
+    expect(sessionStore.createNewSession).toHaveBeenCalledWith('新会话')
     expect(appStore.currentSessionId).toBe('new-session')
   })
 
   it('should clear input after send', async () => {
     const appStore = useAppStore()
     appStore.setCurrentSession('session-123')
-    window.electronAPI.api.createSession = vi.fn().mockResolvedValue({ session_id: 'session-123' })
-    window.electronAPI.ws = {
+    
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined)
-    }
+    }))
     
     const wrapper = mount(ChatCore, {
       global: {
@@ -169,6 +194,11 @@ describe('ChatCore Component', () => {
   })
 
   it('should not send empty message', async () => {
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
+      sendMessage: vi.fn().mockResolvedValue(undefined)
+    }))
+    
     const wrapper = mount(ChatCore, {
       global: {
         plugins: [pinia]
@@ -181,10 +211,18 @@ describe('ChatCore Component', () => {
     vm.inputText = ''
     await vm.handleSend()
     
-    expect(window.electronAPI?.ws?.sendMessage).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('should handle keydown Enter to send', async () => {
+    const appStore = useAppStore()
+    appStore.setCurrentSession('session-123')
+    
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
+      sendMessage: vi.fn().mockResolvedValue(undefined)
+    }))
+    
     const wrapper = mount(ChatCore, {
       global: {
         plugins: [pinia]
@@ -196,14 +234,21 @@ describe('ChatCore Component', () => {
     const vm = wrapper.vm as any
     vm.inputText = 'Test message'
     
-    const event = new KeyboardEvent('keydown', { key: 'Enter' })
     const textarea = wrapper.find('textarea')
-    await textarea.trigger('keydown', event)
+    await textarea.trigger('keydown', { key: 'Enter' })
     
-    expect(window.electronAPI?.ws?.sendMessage).toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalled()
   })
 
   it('should not send on Enter with Shift', async () => {
+    const appStore = useAppStore()
+    appStore.setCurrentSession('session-123')
+    
+    // Mock API functions
+    vi.mock('@/api/chat', () => ({
+      sendMessage: vi.fn().mockResolvedValue(undefined)
+    }))
+    
     const wrapper = mount(ChatCore, {
       global: {
         plugins: [pinia]
@@ -215,11 +260,10 @@ describe('ChatCore Component', () => {
     const vm = wrapper.vm as any
     vm.inputText = 'Test message'
     
-    const event = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true })
     const textarea = wrapper.find('textarea')
-    await textarea.trigger('keydown', event)
+    await textarea.trigger('keydown', { key: 'Enter', shiftKey: true })
     
-    expect(window.electronAPI?.ws?.sendMessage).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('should handle drag over', async () => {
@@ -296,6 +340,21 @@ describe('ChatCore Component', () => {
   })
 
   it('should handle upload command', async () => {
+    // Mock electronAPI
+    vi.mock('@/utils/electron', () => ({
+      electronAPI: {
+        openFileDialog: vi.fn().mockResolvedValue({
+          canceled: false,
+          files: [{ path: 'test.txt', name: 'test.txt' }]
+        })
+      }
+    }))
+    
+    // Mock API functions
+    vi.mock('@/api/file', () => ({
+      uploadFile: vi.fn().mockResolvedValue({ name: 'test.txt' })
+    }))
+    
     const wrapper = mount(ChatCore, {
       global: {
         plugins: [pinia]
@@ -305,8 +364,8 @@ describe('ChatCore Component', () => {
     await wrapper.vm.$nextTick()
     
     const vm = wrapper.vm as any
-    vm.handleUpload()
+    await vm.handleUpload()
     
-    expect(window.electronAPI.file.selectFiles).toHaveBeenCalled()
+    expect(electronAPI.openFileDialog).toHaveBeenCalled()
   })
 })

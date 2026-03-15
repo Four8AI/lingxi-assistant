@@ -1,11 +1,11 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 
 let electronApp: ElectronApplication
 let page: Page
 
-test.describe.beforeAll(async () => {
+test.beforeAll(async () => {
   const projectRoot = path.resolve(__dirname, '../../')
   electronApp = await electron.launch({
     args: [path.join(projectRoot, 'dist-electron/main/index.js')],
@@ -21,7 +21,7 @@ test.describe.beforeAll(async () => {
   await page.waitForTimeout(3000)
 }, 90000)
 
-test.describe.afterAll(async () => {
+test.afterAll(async () => {
   if (electronApp) {
     try {
       const pages = electronApp.windows()
@@ -107,9 +107,9 @@ test.describe('技能系统功能测试', () => {
     }
   })
   
-  test('应该支持技能优先级（工作目录 > 全局）', async ({ skip }) => {
+  test('应该支持技能优先级（工作目录 > 全局）', async () => {
     // 这个测试需要特定的工作目录配置，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 在同名技能场景下
     // 2. 验证工作目录技能优先调用

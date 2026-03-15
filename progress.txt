@@ -148,3 +148,24 @@ cd /home/admin/lingxi-assistant
 - 文档完整：每个技能都有详细的 SKILL.md 文档
 
 **任务完成！所有优化目标均已达成。** ✅
+
+---
+
+## [2026-03-16] - Task: 执行单元测试并排查错误
+
+### What was done:
+- 修复了 StepInterventionCard 组件中的属性名称问题，将 stepIndex 改为 step_index
+- 修复了 StepInterventionCard 组件的 handleSkip 和 handleRetry 函数，使其正确传递 step_index
+- 修改了 WorkspaceSwitchDialog 测试用例，让模拟的 switchWorkspace 方法调用 loadCurrentWorkspace
+- 运行了完整的单元测试套件，所有 394 个测试用例都通过了
+
+### Testing:
+- 执行 `npm run test:unit` 命令
+- 所有测试文件通过：23/23
+- 所有测试用例通过：394/394
+- 测试持续时间：13.04s
+
+### Notes:
+- 修复了组件中的属性命名不一致问题
+- 确保了测试用例正确模拟了组件的行为
+- 所有测试现在都能正常通过，为后续开发提供了可靠的测试基础

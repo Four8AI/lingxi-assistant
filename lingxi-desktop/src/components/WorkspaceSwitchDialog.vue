@@ -57,6 +57,7 @@ import { ref, computed, watch } from 'vue'
 import { Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { validateWorkspace as validateWorkspaceApi } from '@/api/workspace'
 
 const workspaceStore = useWorkspaceStore()
 
@@ -90,8 +91,8 @@ const selectDirectory = async () => {
 
 const validateWorkspace = async (path: string) => {
   try {
-    const result = await window.electronAPI.workspace.validate(path)
-    validationResult.value = result.data
+    const result = await validateWorkspaceApi(path)
+    validationResult.value = result
   } catch (error) {
     ElMessage.error('验证失败：' + (error as Error).message)
   }
@@ -103,12 +104,10 @@ const handleSwitch = async () => {
   isSwitching.value = true
   
   try {
-    const result = await window.electronAPI.workspace.switch(newWorkspacePath.value, false)
+    const result = await workspaceStore.switchWorkspace(newWorkspacePath.value, false)
     
     if (result.success) {
       ElMessage.success('工作目录切换成功')
-      await workspaceStore.loadCurrentWorkspace()
-      await workspaceStore.reloadSessions()
       visible.value = false
     } else {
       ElMessage.error('切换失败：' + result.error)

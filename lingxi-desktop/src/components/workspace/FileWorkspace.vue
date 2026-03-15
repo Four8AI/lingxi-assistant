@@ -214,7 +214,10 @@ async function handleContextMenuCommand(command: string) {
   switch (command) {
     case 'openInExplorer':
       try {
-        await window.electronAPI.file.openExplorer(selectedNode.value.path)
+        // 在Electron环境下打开文件资源管理器
+        if (electronAPI.isElectron()) {
+          await window.electronAPI.file.openExplorer(selectedNode.value.path)
+        }
       } catch (error) {
         console.error('Failed to open in explorer:', error)
       }

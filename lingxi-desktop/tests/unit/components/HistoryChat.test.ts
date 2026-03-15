@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import HistoryChat from '@/components/HistoryChat.vue'
 import { useAppStore } from '@/stores/app'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useSessionStore } from '@/stores/session'
 
 // Mock ElMessageBox
 vi.mock('element-plus', async () => {
@@ -164,9 +165,12 @@ describe('HistoryChat Component', () => {
   })
 
   it('should call handleNewSession when new session button is clicked', async () => {
-    window.electronAPI.api.createSession = vi.fn().mockResolvedValue({
-      session_id: 'new-session',
-      first_message: 'New Session'
+    const sessionStore = useSessionStore()
+    const createNewSessionMock = vi.spyOn(sessionStore, 'createNewSession').mockResolvedValue({
+      id: 'new-session',
+      name: 'New Session',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     })
     
     const wrapper = mount(HistoryChat, {
@@ -179,15 +183,24 @@ describe('HistoryChat Component', () => {
     await newSessionButton?.trigger('click')
     await wrapper.vm.$nextTick()
     
-    expect(window.electronAPI.api.createSession).toHaveBeenCalled()
+    expect(createNewSessionMock).toHaveBeenCalled()
   })
 
   it('should add new session to list after creation', async () => {
-    window.electronAPI.api.createSession = vi.fn().mockResolvedValue({
-      session_id: 'new-session',
-      first_message: 'New Session'
+    const sessionStore = useSessionStore()
+    sessionStore.sessions = [{
+      id: 'new-session',
+      name: 'New Session',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }]
+    vi.spyOn(sessionStore, 'createNewSession').mockResolvedValue({
+      id: 'new-session',
+      name: 'New Session',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     })
-    window.electronAPI.api.getSessionInfo = vi.fn().mockResolvedValue({ task_list: [] })
+    vi.spyOn(sessionStore, 'loadSessionMessages').mockResolvedValue(undefined)
     
     const appStore = useAppStore()
     
@@ -243,10 +256,12 @@ describe('HistoryChat Component', () => {
   })
 
   it('should call handleSelectWorkspace when workspace icon is clicked', async () => {
-    window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/test/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({ valid: true, message: 'Valid' })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: true })
-    window.electronAPI.api.getWorkspaceSessions = vi.fn().mockResolvedValue({ sessions: [] })
+    const workspaceStore = useWorkspaceStore()
+    const switchWorkspaceMock = vi.spyOn(workspaceStore, 'switchWorkspace').mockResolvedValue({ success: true })
+    
+    const sessionStore = useSessionStore()
+    sessionStore.sessions = []
+    vi.spyOn(sessionStore, 'loadSessions').mockResolvedValue(undefined)
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -257,7 +272,7 @@ describe('HistoryChat Component', () => {
     const workspaceIcon = wrapper.find('.workspace-icon')
     await workspaceIcon.trigger('click')
     
-    expect(window.electronAPI.file.selectDirectory).toHaveBeenCalled()
+    expect(switchWorkspaceMock).toHaveBeenCalled()
   })
 
   it('should format recent time correctly', () => {
@@ -311,7 +326,9 @@ describe('HistoryChat Component', () => {
   it('should handle rename command', async () => {
     const appStore = useAppStore()
     appStore.setSessions(mockSessions)
-    window.electronAPI.api.updateSessionName = vi.fn().mockResolvedValue(undefined)
+    
+    const sessionStore = useSessionStore()
+    vi.spyOn(sessionStore, 'renameSession').mockResolvedValue(undefined)
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -331,7 +348,10 @@ describe('HistoryChat Component', () => {
   it('should handle delete command', async () => {
     const appStore = useAppStore()
     appStore.setSessions(mockSessions)
-    window.electronAPI.api.deleteSession = vi.fn().mockResolvedValue(undefined)
+    
+    const sessionStore = useSessionStore()
+    sessionStore.sessions = [mockSessions[0]]
+    vi.spyOn(sessionStore, 'deleteSession').mockResolvedValue(undefined)
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -368,7 +388,8 @@ describe('HistoryChat Component', () => {
 
   it('should display workspace path from store', async () => {
     const workspaceStore = useWorkspaceStore()
-    workspaceStore.workspacePath = '/test/workspace'
+    // Mock the workspace path
+    vi.spyOn(workspaceStore, 'workspacePath', 'get').mockReturnValue('/test/workspace')
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -397,7 +418,9 @@ describe('HistoryChat Component', () => {
   it('should handle session info loading error', async () => {
     const appStore = useAppStore()
     appStore.setSessions(mockSessions)
-    window.electronAPI.api.getSessionInfo = vi.fn().mockRejectedValue(new Error('Not found'))
+    
+    const sessionStore = useSessionStore()
+    vi.spyOn(sessionStore, 'loadSessionMessages').mockRejectedValue(new Error('Not found'))
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -416,7 +439,9 @@ describe('HistoryChat Component', () => {
   it('should remove session from list if it does not exist', async () => {
     const appStore = useAppStore()
     appStore.setSessions(mockSessions)
-    window.electronAPI.api.getSessionInfo = vi.fn().mockRejectedValue({
+    
+    const sessionStore = useSessionStore()
+    vi.spyOn(sessionStore, 'loadSessionMessages').mockRejectedValue({
       response: { status: 404 },
       message: 'Session does not exist'
     })
@@ -439,7 +464,11 @@ describe('HistoryChat Component', () => {
     const appStore = useAppStore()
     appStore.setSessions(mockSessions)
     appStore.setCurrentSession('session-1')
-    window.electronAPI.api.deleteSession = vi.fn().mockResolvedValue(undefined)
+    
+    const sessionStore = useSessionStore()
+    sessionStore.sessions = [mockSessions[1]]
+    sessionStore.currentSessionId = 'session-2'
+    vi.spyOn(sessionStore, 'deleteSession').mockResolvedValue(undefined)
     
     const wrapper = mount(HistoryChat, {
       global: {
@@ -459,7 +488,11 @@ describe('HistoryChat Component', () => {
     const appStore = useAppStore()
     appStore.setSessions([mockSessions[0]])
     appStore.setCurrentSession('session-1')
-    window.electronAPI.api.deleteSession = vi.fn().mockResolvedValue(undefined)
+    
+    const sessionStore = useSessionStore()
+    sessionStore.sessions = []
+    sessionStore.currentSessionId = null
+    vi.spyOn(sessionStore, 'deleteSession').mockResolvedValue(undefined)
     
     const wrapper = mount(HistoryChat, {
       global: {

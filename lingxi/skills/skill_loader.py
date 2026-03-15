@@ -180,9 +180,12 @@ class SkillLoader:
 
         if os.path.exists(config_path):
             config = self._load_json_config(config_path)
-            # 缓存配置
-            if self.cache and config:
-                self.cache.set_config(skill_id, config, config_path)
+            if config:
+                # 添加 skill_id 字段
+                config['skill_id'] = skill_id
+                # 缓存配置
+                if self.cache:
+                    self.cache.set_config(skill_id, config, config_path)
             return config
 
         # 尝试 SKILL.md（MCP 格式）
@@ -190,14 +193,34 @@ class SkillLoader:
 
         if os.path.exists(skill_md_path):
             config = self._load_mcp_config(skill_md_path)
-            # 缓存配置
-            if self.cache and config:
-                file_path = skill_md_path if os.path.exists(skill_md_path) else os.path.join(skill_dir, "main.py")
-                self.cache.set_config(skill_id, config, file_path)
+            if config:
+                # 添加 skill_id 字段
+                config['skill_id'] = skill_id
+                # 缓存配置
+                if self.cache:
+                    file_path = skill_md_path if os.path.exists(skill_md_path) else os.path.join(skill_dir, "main.py")
+                    self.cache.set_config(skill_id, config, file_path)
             return config
 
         self.logger.warning(f"技能配置文件不存在：{skill_dir}")
         return None
+    
+    def _load_json_config(self, config_path: str) -> Optional[Dict[str, Any]]:
+        """从 skill.json 文件加载 JSON 格式配置
+        
+        Args:
+            config_path: skill.json 文件路径
+            
+        Returns:
+            技能配置字典
+        """
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            return config
+        except Exception as e:
+            self.logger.error(f"加载 skill.json 失败：{e}")
+            return None
     
     def _load_mcp_config(self, skill_md_path: str) -> Optional[Dict[str, Any]]:
         """从 SKILL.md 文件加载 MCP 格式配置

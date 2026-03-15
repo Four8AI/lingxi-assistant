@@ -42,22 +42,52 @@ export async function getHistoryMessages(
   sessionId: string, 
   limit: number = 50
 ): Promise<Message[]> {
-  const response = await apiClient.get(`/api/sessions/${sessionId}/messages`, {
-    params: { limit }
-  })
-  return response
+  try {
+    // 调用会话详情接口获取消息历史
+    const response = await apiClient.get(`/api/sessions/${sessionId}`)
+    
+    // 从 task_list 中提取消息历史
+    if (response.task_list && Array.isArray(response.task_list)) {
+      return response.task_list.slice(0, limit).map((task: any) => ({
+        id: `${sessionId}_${task.task_id || Math.random()}`,
+        content: task.user_input || task.result || '',
+        role: task.user_input ? 'user' : 'assistant',
+        session_id: sessionId,
+        created_at: task.created_at || new Date().toISOString()
+      }))
+    }
+    return []
+  } catch (error) {
+    console.error('Failed to get messages:', error)
+    return []
+  }
 }
 
 /**
  * 停止生成
  */
 export async function stopGeneration(sessionId: string): Promise<void> {
-  await apiClient.post(`/api/sessions/${sessionId}/stop`)
+  try {
+    await apiClient.post(`/api/sessions/${sessionId}/stop`)
+  } catch (error) {
+    // 如果 stop 接口不存在，忽略错误
+    console.warn('Stop generation endpoint not available:', error)
+  }
 }
 
 /**
  * 清除对话历史
  */
 export async function clearHistory(sessionId: string): Promise<void> {
-  await apiClient.delete(`/api/sessions/${sessionId}/messages`)
+  try {
+    await apiClient.delete(`/api/sessions/${sessionId}/messages`)
+  } catch (error) {
+    // 如果 messages 接口不存在，尝试使用 history 接口
+    try {
+      await apiClient.delete(`/api/sessions/${sessionId}/history`)
+    } catch (historyError) {
+      // 如果两个接口都失败，忽略错误
+      console.warn('Clear history endpoint not available:', historyError)
+    }
+  }
 }

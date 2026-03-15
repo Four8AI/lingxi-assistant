@@ -1,11 +1,11 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 
 let electronApp: ElectronApplication
 let page: Page
 
-test.describe.beforeAll(async () => {
+test.beforeAll(async () => {
   const projectRoot = path.resolve(__dirname, '../../')
   
   electronApp = await electron.launch({
@@ -23,7 +23,7 @@ test.describe.beforeAll(async () => {
   await page.waitForTimeout(3000) // 等待应用完全加载
 })
 
-test.describe.afterAll(async () => {
+test.afterAll(async () => {
   if (electronApp) {
     try {
       const pages = electronApp.windows()

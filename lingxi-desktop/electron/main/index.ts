@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
+import { FileManager } from './fileManager'
 
 /**
  * 灵犀助手 - Main Process（精简版）
@@ -16,6 +17,7 @@ import * as fs from 'fs'
 class App {
   private mainWindow: BrowserWindow | null = null
   private isQuitting: boolean = false
+  private fileManager: FileManager = new FileManager()
 
   constructor() {
     this.setupAppEvents()
@@ -62,7 +64,7 @@ class App {
       minHeight: 600,
       frame: false, // 无边框窗口
       webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
+        preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true
@@ -145,6 +147,27 @@ class App {
     // ========== 系统信息 ==========
     ipcMain.handle('app:getVersion', () => {
       return app.getVersion()
+    })
+
+    // ========== 文件管理 ==========
+    ipcMain.handle('file:selectDirectory', async () => {
+      return await this.fileManager.selectDirectory()
+    })
+
+    ipcMain.handle('file:selectFiles', async (event, filters) => {
+      return await this.fileManager.selectFiles(filters)
+    })
+
+    ipcMain.handle('file:openFile', async (event, filePath) => {
+      return await this.fileManager.openFile(filePath)
+    })
+
+    ipcMain.handle('file:openExplorer', async (event, filePath) => {
+      return await this.fileManager.openInExplorer(filePath)
+    })
+
+    ipcMain.handle('file:readDirectoryTree', async (event, dirPath, maxDepth) => {
+      return await this.fileManager.readDirectoryTree(dirPath, maxDepth)
     })
 
     // ========== 日志 ==========

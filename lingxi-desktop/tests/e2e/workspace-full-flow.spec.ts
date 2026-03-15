@@ -1,4 +1,4 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -8,7 +8,7 @@ let electronApp: ElectronApplication
 let page: Page
 let testWorkspacePath: string
 
-test.describe.beforeAll(async () => {
+test.beforeAll(async () => {
   const projectRoot = path.resolve(__dirname, '../../')
   
   // 创建临时测试工作目录
@@ -29,7 +29,7 @@ test.describe.beforeAll(async () => {
   await page.waitForTimeout(3000)
 }, 90000)
 
-test.describe.afterAll(async () => {
+test.afterAll(async () => {
   // 清理临时测试目录
   if (testWorkspacePath && fs.existsSync(testWorkspacePath)) {
     try {
@@ -156,9 +156,9 @@ test.describe('工作目录完整流程测试', () => {
     }
   })
   
-  test('应该支持工作目录配置覆盖', async ({ skip }) => {
+  test('应该支持工作目录配置覆盖', async () => {
     // 这个测试需要预配置的工作目录，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 配置全局设置
     // 2. 切换到有配置的工作目录

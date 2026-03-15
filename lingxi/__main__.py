@@ -489,6 +489,8 @@ def main():
         args.install_skill
     ])
 
+    assistant = None
+    
     if is_console_mode:
         # 控制台交互式模式，修改配置中的日志级别
         import yaml
@@ -513,34 +515,37 @@ def main():
         
         # 传递加载后的配置给 LingxiAssistant
         assistant = LingxiAssistant(config)
-    else:
-        # 其他模式，使用默认配置
+    elif not args.web:
+        # 其他非 Web 模式，使用默认配置
         assistant = LingxiAssistant(args.config)
+    # Web 模式下不创建 LingxiAssistant 实例，因为后面会创建 AsyncLingxiAssistant
 
-    if args.cleanup_checkpoints:
-        count = assistant.cleanup_checkpoints()
-        print(f"清理了 {count} 个过期检查点")
-        return
+    # 只有在非 Web 模式下才处理这些命令
+    if not args.web:
+        if args.cleanup_checkpoints:
+            count = assistant.cleanup_checkpoints()
+            print(f"清理了 {count} 个过期检查点")
+            return
 
-    if args.list_checkpoints:
-        assistant.list_checkpoints()
-        return
+        if args.list_checkpoints:
+            assistant.list_checkpoints()
+            return
 
-    if args.clear_checkpoint:
-        assistant.clear_checkpoint(args.clear_checkpoint)
-        return
+        if args.clear_checkpoint:
+            assistant.clear_checkpoint(args.clear_checkpoint)
+            return
 
-    if args.list_skills:
-        assistant.list_skills()
-        return
+        if args.list_skills:
+            assistant.list_skills()
+            return
 
-    if args.install_skill:
-        success = assistant.install_skill(args.install_skill, args.skill_name, args.overwrite)
-        if success:
-            print("技能安装成功")
-        else:
-            print("技能安装失败")
-        return
+        if args.install_skill:
+            success = assistant.install_skill(args.install_skill, args.skill_name, args.overwrite)
+            if success:
+                print("技能安装成功")
+            else:
+                print("技能安装失败")
+            return
 
     if args.web:
         # 启动 Web 服务器
@@ -558,24 +563,26 @@ def main():
         from lingxi.core.assistant.async_main import AsyncLingxiAssistant
         from lingxi.core.event.websocket_subscriber import WebSocketSubscriber
         
-        print("=" * 60)
-        print("灵犀智能助手 - WebSocket服务器")
-        print("=" * 60)
-        print()
+        if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+            print("=" * 60)
+            print("灵犀智能助手 - WebSocket服务器")
+            print("=" * 60)
+            print()
         
         config = get_config()
         web_config = config.get('web', {})
         host = web_config.get('host', 'localhost')
         port = web_config.get('port', 5000)
         
-        print(f"服务器地址: http://{host}:{port}")
-        print(f"WebSocket 端点：ws://{host}:{port}/ws")
-        print(f"Web 界面：http://{host}:{port}/static/index.html")
-        print(f"API 文档：http://{host}:{port}/docs")
-        print()
-        print("按 Ctrl+C 停止服务器")
-        print("=" * 60)
-        print()
+        if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+            print(f"服务器地址: http://{host}:{port}")
+            print(f"WebSocket 端点：ws://{host}:{port}/ws")
+            print(f"Web 界面：http://{host}:{port}/static/index.html")
+            print(f"API 文档：http://{host}:{port}/docs")
+            print()
+            print("按 Ctrl+C 停止服务器")
+            print("=" * 60)
+            print()
         
         # 初始化助手和 WebSocket 管理器
         try:
@@ -606,9 +613,13 @@ def main():
         try:
             run_server(config)
         except KeyboardInterrupt:
-            print("\n\n服务器已停止")
+            if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+                print("\n\n服务器已停止")
         except Exception as e:
-            print(f"\n\n服务器启动失败：{e}")
+            if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+                print(f"\n\n服务器启动失败：{e}")
+            import traceback
+            traceback.print_exc()
             sys.exit(1)
     else:
         assistant.interactive_mode(args.session)

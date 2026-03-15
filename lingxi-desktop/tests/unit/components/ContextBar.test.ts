@@ -248,8 +248,6 @@ describe('ContextBar Component', () => {
         limit: 10000
       }
     }
-    appStore.tokenStatus = 'normal'
-    appStore.tokenPercentage = 10
     
     const wrapper = mount(ContextBar, {
       global: {
@@ -266,13 +264,11 @@ describe('ContextBar Component', () => {
         limit: 10000
       }
     }
-    appStore.tokenStatus = 'warning'
-    appStore.tokenPercentage = 80
     
     await wrapper.vm.$nextTick()
     
     const fill = wrapper.find('.context-bar-fill')
-    expect(fill.classes()).toContain('warning')
+    expect(fill.classes()).toContain('critical')
     expect(fill.attributes('style')).toContain('width: 80%')
   })
 

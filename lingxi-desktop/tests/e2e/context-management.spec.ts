@@ -1,11 +1,11 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 
 let electronApp: ElectronApplication
 let page: Page
 
-test.describe.beforeAll(async () => {
+test.beforeAll(async () => {
   const projectRoot = path.resolve(__dirname, '../../')
   electronApp = await electron.launch({
     args: [path.join(projectRoot, 'dist-electron/main/index.js')],
@@ -21,7 +21,7 @@ test.describe.beforeAll(async () => {
   await page.waitForTimeout(3000)
 }, 90000)
 
-test.describe.afterAll(async () => {
+test.afterAll(async () => {
   if (electronApp) {
     try {
       const pages = electronApp.windows()
@@ -76,9 +76,9 @@ test.describe('上下文管理功能测试', () => {
     }
   })
   
-  test('应该自动压缩超限的历史记录', async ({ skip }) => {
+  test('应该自动压缩超限的历史记录', async () => {
     // 这个测试需要发送大量消息，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 发送大量消息超出预算
     // 2. 验证压缩提示显示
@@ -139,9 +139,9 @@ test.describe('上下文管理功能测试', () => {
     }
   })
   
-  test('应该显示 Token 预算警告', async ({ skip }) => {
+  test('应该显示 Token 预算警告', async () => {
     // 需要达到预算阈值，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 发送消息直到接近预算
     // 2. 验证警告提示显示

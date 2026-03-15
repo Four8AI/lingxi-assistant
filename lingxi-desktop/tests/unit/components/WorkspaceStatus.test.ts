@@ -171,8 +171,8 @@ describe('WorkspaceStatus Component', () => {
   })
 
   it('should call loadCurrentWorkspace on mount', async () => {
-    window.electronAPI.workspace.getCurrent = vi.fn().mockResolvedValue(null)
-    window.electronAPI.api.getSkills = vi.fn().mockResolvedValue([])
+    const workspaceStore = useWorkspaceStore()
+    const loadCurrentWorkspaceMock = vi.spyOn(workspaceStore, 'loadCurrentWorkspace')
     
     const wrapper = mount(WorkspaceStatus, {
       global: {
@@ -182,7 +182,7 @@ describe('WorkspaceStatus Component', () => {
     
     await wrapper.vm.$nextTick()
     
-    expect(window.electronAPI.workspace.getCurrent).toHaveBeenCalled()
+    expect(loadCurrentWorkspaceMock).toHaveBeenCalled()
   })
 
   it('should display switch button', () => {

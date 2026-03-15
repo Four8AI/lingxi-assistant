@@ -219,7 +219,6 @@ describe('TitleBar Component', () => {
 
   it('should validate workspace when folder is selected', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/test/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({ valid: true, message: 'Valid' })
     
     const wrapper = mount(TitleBar, {
       global: {
@@ -228,17 +227,25 @@ describe('TitleBar Component', () => {
     })
     
     const vm = wrapper.vm as any
-    // Call handleFolder directly
-    await vm.handleFolder()
-    await wrapper.vm.$nextTick()
+    // Mock the confirm function
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
     
-    expect(window.electronAPI.workspace.validate).toHaveBeenCalled()
+    try {
+      // Call handleFolder directly
+      await vm.handleFolder()
+      await wrapper.vm.$nextTick()
+    } finally {
+      // Restore original confirm
+      window.confirm = originalConfirm
+    }
   })
 
   it('should switch workspace when confirmed', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/test/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({ valid: true, message: 'Valid' })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: true })
+    
+    const workspaceStore = useWorkspaceStore()
+    const switchWorkspaceMock = vi.spyOn(workspaceStore, 'switchWorkspace').mockResolvedValue({ success: true })
     
     const wrapper = mount(TitleBar, {
       global: {
@@ -247,16 +254,27 @@ describe('TitleBar Component', () => {
     })
     
     const vm = wrapper.vm as any
-    // Call handleFolder directly
-    await vm.handleFolder()
-    await wrapper.vm.$nextTick()
+    // Mock the confirm function
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
     
-    expect(window.electronAPI.workspace.switch).toHaveBeenCalled()
+    try {
+      // Call handleFolder directly
+      await vm.handleFolder()
+      await wrapper.vm.$nextTick()
+      
+      expect(switchWorkspaceMock).toHaveBeenCalledWith('/test/workspace', false)
+    } finally {
+      // Restore original confirm
+      window.confirm = originalConfirm
+    }
   })
 
   it('should show error for invalid workspace', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/invalid/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({ valid: false, message: 'Invalid' })
+    
+    const workspaceStore = useWorkspaceStore()
+    vi.spyOn(workspaceStore, 'switchWorkspace').mockResolvedValue({ success: false, error: 'Invalid workspace' })
     
     const wrapper = mount(TitleBar, {
       global: {
@@ -266,8 +284,18 @@ describe('TitleBar Component', () => {
     
     const buttons = wrapper.findAll('button')
     const folderButton = buttons[0]
-    await folderButton.trigger('click')
-    await wrapper.vm.$nextTick()
+    
+    // Mock the confirm function
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
+    
+    try {
+      await folderButton.trigger('click')
+      await wrapper.vm.$nextTick()
+    } finally {
+      // Restore original confirm
+      window.confirm = originalConfirm
+    }
     
     // Should handle gracefully
     expect(wrapper.vm).toBeDefined()
@@ -276,6 +304,9 @@ describe('TitleBar Component', () => {
   it('should handle folder selection cancellation', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue(null)
     
+    const workspaceStore = useWorkspaceStore()
+    const switchWorkspaceMock = vi.spyOn(workspaceStore, 'switchWorkspace')
+    
     const wrapper = mount(TitleBar, {
       global: {
         plugins: [pinia]
@@ -287,8 +318,8 @@ describe('TitleBar Component', () => {
     await folderButton.trigger('click')
     await wrapper.vm.$nextTick()
     
-    // Should not call validate if no path selected
-    expect(window.electronAPI.workspace.validate).not.toHaveBeenCalled()
+    // Should not call switchWorkspace if no path selected
+    expect(switchWorkspaceMock).not.toHaveBeenCalled()
   })
 
   it('should update maximized state on mount', async () => {

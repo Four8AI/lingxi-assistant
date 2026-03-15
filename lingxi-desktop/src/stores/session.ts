@@ -12,10 +12,13 @@ import {
   exportSession,
   type Session 
 } from '@/api/session'
+import { getHistoryMessages } from '@/api/chat'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export interface SessionState {
   sessions: Session[]
   currentSessionId: string | null
+  currentSessionMessages: any[]
   isLoading: boolean
   error: string | null
 }
@@ -24,6 +27,7 @@ export const useSessionStore = defineStore('session', {
   state: (): SessionState => ({
     sessions: [],
     currentSessionId: null,
+    currentSessionMessages: [],
     isLoading: false,
     error: null
   }),
@@ -45,7 +49,14 @@ export const useSessionStore = defineStore('session', {
       this.error = null
       
       try {
-        this.sessions = await getSessions()
+        const sessionsData = await getSessions()
+        this.sessions = sessionsData.map(session => ({
+          id: session.session_id || session.id,
+          name: session.title || session.name,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+          message_count: session.message_count || session.task_count
+        }))
         return this.sessions
       } catch (error) {
         this.error = (error as Error).message
@@ -63,7 +74,11 @@ export const useSessionStore = defineStore('session', {
       this.error = null
       
       try {
-        const session = await createSession(name)
+        // 获取当前工作目录
+        const workspaceStore = useWorkspaceStore()
+        const workspacePath = workspaceStore.workspacePath
+        
+        const session = await createSession(name, workspacePath)
         this.sessions.push(session)
         this.currentSessionId = session.id
         return session
@@ -188,6 +203,41 @@ export const useSessionStore = defineStore('session', {
      */
     setSessions(sessions: Session[]) {
       this.sessions = sessions
+    },
+
+    /**
+     * 加载会话消息
+     */
+    async loadSessionMessages(sessionId: string) {
+      this.isLoading = true
+      this.error = null
+      
+      try {
+        const messages = await getHistoryMessages(sessionId)
+        // 转换消息格式为应用需要的格式
+        this.currentSessionMessages = messages.map((message, index) => ({
+          id: `${sessionId}_${index}_${message.role}`,
+          role: message.role,
+          content: message.content,
+          time: new Date(message.created_at).getTime(),
+          timestamp: new Date(message.created_at).getTime(),
+          isStreaming: false
+        }))
+        return this.currentSessionMessages
+      } catch (error) {
+        this.error = (error as Error).message
+        this.currentSessionMessages = []
+        throw error
+      } finally {
+        this.isLoading = false
+      }
+    },
+
+    /**
+     * 清空当前会话消息
+     */
+    clearCurrentSessionMessages() {
+      this.currentSessionMessages = []
     }
   }
 })

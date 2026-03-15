@@ -46,7 +46,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath: string) => 
     ipcRenderer.invoke('file:read', filePath),
   writeFile: (filePath: string, content: string) => 
-    ipcRenderer.invoke('file:write', { filePath, content })
+    ipcRenderer.invoke('file:write', { filePath, content }),
+  
+  // 文件管理
+  file: {
+    selectDirectory: () => ipcRenderer.invoke('file:selectDirectory'),
+    selectFiles: (filters: any) => ipcRenderer.invoke('file:selectFiles', filters),
+    openFile: (filePath: string) => ipcRenderer.invoke('file:openFile', filePath),
+    openExplorer: (filePath: string) => ipcRenderer.invoke('file:openExplorer', filePath),
+    readDirectoryTree: (dirPath: string, maxDepth: number) => ipcRenderer.invoke('file:readDirectoryTree', dirPath, maxDepth)
+  }
 })
 
 // 类型声明

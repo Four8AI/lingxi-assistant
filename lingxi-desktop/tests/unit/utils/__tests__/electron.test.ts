@@ -2,7 +2,7 @@
  * Electron Utils 单元测试
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { isElectron, electronAPI } from '../electron'
+import { isElectron, electronAPI } from '@/utils/electron'
 
 describe('Electron Utils', () => {
   let originalElectronAPI: any

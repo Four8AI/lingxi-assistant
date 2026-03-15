@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import WorkspaceSwitchDialog from '@/components/WorkspaceSwitchDialog.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import * as workspaceApi from '@/api/workspace'
 
 describe('WorkspaceSwitchDialog Component', () => {
   let pinia: ReturnType<typeof createPinia>
@@ -152,8 +153,8 @@ describe('WorkspaceSwitchDialog Component', () => {
 
   it('should validate workspace after selection', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid workspace' }
+    const validateWorkspaceMock = vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid workspace', exists: true, has_lingxi_dir: false
     })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
@@ -162,13 +163,13 @@ describe('WorkspaceSwitchDialog Component', () => {
     await selectButton?.trigger('click')
     await wrapper.vm.$nextTick()
     
-    expect(window.electronAPI.workspace.validate).toHaveBeenCalledWith('/new/workspace')
+    expect(validateWorkspaceMock).toHaveBeenCalledWith('/new/workspace')
   })
 
   it('should show validation result', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: '有效的工作目录' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: '有效的工作目录', exists: true, has_lingxi_dir: false
     })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
@@ -183,8 +184,8 @@ describe('WorkspaceSwitchDialog Component', () => {
 
   it('should show error for invalid workspace', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/invalid/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: false, message: '无效的工作目录' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: false, message: '无效的工作目录', exists: false, has_lingxi_dir: false
     })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
@@ -204,11 +205,12 @@ describe('WorkspaceSwitchDialog Component', () => {
       is_initialized: true
     }
     
+    const switchWorkspaceMock = vi.spyOn(workspaceStore, 'switchWorkspace').mockResolvedValue({ success: true })
+    
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid', exists: true, has_lingxi_dir: false
     })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
     
@@ -222,7 +224,7 @@ describe('WorkspaceSwitchDialog Component', () => {
     await switchButton?.trigger('click')
     await wrapper.vm.$nextTick()
     
-    expect(window.electronAPI.workspace.switch).toHaveBeenCalledWith('/new/workspace', false)
+    expect(switchWorkspaceMock).toHaveBeenCalledWith('/new/workspace', false)
   })
 
   it('should call loadCurrentWorkspace after successful switch', async () => {
@@ -234,11 +236,17 @@ describe('WorkspaceSwitchDialog Component', () => {
     workspaceStore.reloadSessions = vi.fn().mockResolvedValue(undefined)
     workspaceStore.loadCurrentWorkspace = vi.fn().mockResolvedValue(undefined)
     
-    window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid' }
+    // Mock switchWorkspace to call loadCurrentWorkspace
+    const originalSwitchWorkspace = workspaceStore.switchWorkspace
+    workspaceStore.switchWorkspace = vi.fn(async (path: string, force: boolean) => {
+      await workspaceStore.loadCurrentWorkspace()
+      return { success: true }
     })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: true })
+    
+    window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid', exists: true, has_lingxi_dir: false
+    })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
     
@@ -260,12 +268,12 @@ describe('WorkspaceSwitchDialog Component', () => {
       is_initialized: true
     }
     workspaceStore.reloadSessions = vi.fn().mockResolvedValue(undefined)
+    workspaceStore.switchWorkspace = vi.fn().mockResolvedValue({ success: true })
     
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid', exists: true, has_lingxi_dir: false
     })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
     
@@ -288,12 +296,12 @@ describe('WorkspaceSwitchDialog Component', () => {
       is_initialized: true
     }
     workspaceStore.switchDialogVisible = true
+    workspaceStore.switchWorkspace = vi.fn().mockResolvedValue({ success: false, error: 'Switch failed' })
     
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid', exists: true, has_lingxi_dir: false
     })
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue({ success: false, error: 'Switch failed' })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
     
@@ -325,8 +333,8 @@ describe('WorkspaceSwitchDialog Component', () => {
 
   it('should disable switch button when validation fails', async () => {
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/invalid/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: false, message: 'Invalid' }
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: false, message: 'Invalid', exists: false, has_lingxi_dir: false
     })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)
@@ -346,14 +354,13 @@ describe('WorkspaceSwitchDialog Component', () => {
       workspace: '/old/workspace',
       is_initialized: true
     }
+    workspaceStore.switchWorkspace = vi.fn().mockImplementation(() => {
+      return new Promise(resolve => setTimeout(() => resolve({ success: true }), 100))
+    })
     
     window.electronAPI.file.selectDirectory = vi.fn().mockResolvedValue('/new/workspace')
-    window.electronAPI.workspace.validate = vi.fn().mockResolvedValue({
-      data: { valid: true, message: 'Valid' }
-    })
-    // Make switch slow
-    window.electronAPI.workspace.switch = vi.fn().mockImplementation(() => {
-      return new Promise(resolve => setTimeout(() => resolve({ success: true }), 100))
+    vi.spyOn(workspaceApi, 'validateWorkspace').mockResolvedValue({
+      valid: true, message: 'Valid', exists: true, has_lingxi_dir: false
     })
     
     const wrapper = mount(WorkspaceSwitchDialog, mountOptions)

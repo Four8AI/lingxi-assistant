@@ -1,11 +1,11 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 
 let electronApp: ElectronApplication
 let page: Page
 
-test.describe.beforeAll(async () => {
+test.beforeAll(async () => {
   const projectRoot = path.resolve(__dirname, '../../')
   electronApp = await electron.launch({
     args: [path.join(projectRoot, 'dist-electron/main/index.js')],
@@ -21,7 +21,7 @@ test.describe.beforeAll(async () => {
   await page.waitForTimeout(3000)
 }, 90000)
 
-test.describe.afterAll(async () => {
+test.afterAll(async () => {
   if (electronApp) {
     try {
       const pages = electronApp.windows()
@@ -47,27 +47,27 @@ test.describe.afterAll(async () => {
 
 test.describe('错误处理测试', () => {
   
-  test('应该处理后端连接失败', async ({ skip }) => {
+  test('应该处理后端连接失败', async () => {
     // 需要模拟后端不可用场景，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 模拟后端不可用
     // 2. 验证错误提示显示
     // 3. 检查重试机制
   })
   
-  test('应该处理 API 超时', async ({ skip }) => {
+  test('应该处理 API 超时', async () => {
     // 需要模拟慢响应，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 模拟慢响应
     // 2. 验证超时提示
     // 3. 检查取消功能
   })
   
-  test('应该处理 WebSocket 断线重连', async ({ skip }) => {
+  test('应该处理 WebSocket 断线重连', async () => {
     // 需要模拟连接断开，暂时跳过
-    skip()
+    test.skip("暂时跳过")
     
     // 1. 模拟连接断开
     // 2. 验证重连提示

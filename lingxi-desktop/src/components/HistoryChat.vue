@@ -93,44 +93,24 @@ const filteredSessions = computed(() => {
 
 async function handleSelectWorkspace() {
   try {
-    const selectedPath = await window.electronAPI.file.selectDirectory()
-    if (selectedPath) {
-      // 验证工作目录
-      const validationResult = await window.electronAPI.workspace.validate(selectedPath)
+    // 使用 workspaceStore 提供的方法选择工作区
+    const success = await workspaceStore.switchWorkspace()
+    
+    if (success) {
+      // 重新加载会话列表
+      await sessionStore.loadSessions()
+      // 同步到 appStore
+      appStore.setSessions(sessionStore.sessions)
       
-      // 检查验证结果
-      if (!validationResult) {
-        throw new Error('验证返回数据为空')
-      }
-      
-      if (validationResult.valid) {
-        // 调用后台切换工作区接口
-        const switchResult = await window.electronAPI.workspace.switch(selectedPath, false)
-        
-        if (switchResult && switchResult.success) {
-          // 重新加载工作区信息
-          await workspaceStore.loadCurrentWorkspace()
-          
-          // 使用 sessionStore 重新加载会话列表
-          await sessionStore.loadSessions()
-          // 同步到 appStore
-          appStore.setSessions(sessionStore.sessions)
-          
-          // 如果有会话，选择第一个；否则清空当前会话
-          if (sessionStore.sessions.length > 0) {
-            appStore.setCurrentSession(sessionStore.sessions[0].id)
-          } else {
-            appStore.setCurrentSession(null)
-            appStore.setTurns([])
-          }
-          
-          alert('工作区切换成功！')
-        } else {
-          throw new Error(switchResult?.error || '切换失败')
-        }
+      // 如果有会话，选择第一个；否则清空当前会话
+      if (sessionStore.sessions.length > 0) {
+        appStore.setCurrentSession(sessionStore.sessions[0].id)
       } else {
-        throw new Error(validationResult.message || '工作目录无效')
+        appStore.setCurrentSession(null)
+        appStore.setTurns([])
       }
+      
+      alert('工作区切换成功！')
     }
   } catch (error) {
     console.error('Failed to select workspace:', error)
@@ -172,40 +152,11 @@ async function handleSelectSession(sessionId: string) {
   
   appStore.setCurrentSession(sessionId)  
   try {
-    console.log('Calling getSessionInfo for sessionId:', sessionId)
-    const sessionInfo = await window.electronAPI.api.getSessionInfo(sessionId)
-    console.log('Received sessionInfo:', sessionInfo)
-    
-    const turns: any[] = []
-    if (sessionInfo.task_list && Array.isArray(sessionInfo.task_list)) {
-      sessionInfo.task_list.forEach((task: any, taskIndex: number) => {
-        // 添加用户消息
-        if (task.user_input) {
-          turns.push({
-            id: `${sessionId}_${taskIndex}_user`,
-            role: 'user',
-            content: task.user_input,
-            time: task.created_at || Date.now(),
-            timestamp: task.created_at || Date.now()
-          })
-        }
-        
-        // 添加助手消息
-        turns.push({
-          id: `${sessionId}_${taskIndex}_assistant`,
-          role: 'assistant',
-          content: task.result || '',
-          time: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
-          timestamp: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
-          steps: task.steps || [],
-          plan: task.plan || null,
-          executionId: task.task_id || null,
-          status: task.status || null,
-          isStreaming: false
-        })
-      })
-    }
-    appStore.setTurns(turns)
+    console.log('Loading session messages for sessionId:', sessionId)
+    // 使用 sessionStore 加载会话消息
+    await sessionStore.loadSessionMessages(sessionId)
+    // 同步到 appStore
+    appStore.setTurns(sessionStore.currentSessionMessages)
   } catch (error: any) {
     console.error('Failed to load session info:', error)
     if (error?.response?.status === 404 || error?.message?.includes('不存在')) {

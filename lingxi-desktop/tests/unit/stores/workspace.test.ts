@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceStore } from '@/stores/workspace'
+import * as workspaceApi from '@/api/workspace'
+import * as skillsApi from '@/api/skills'
 
 describe('Workspace Store', () => {
   let pinia: ReturnType<typeof createPinia>
@@ -83,12 +85,12 @@ describe('Workspace Store', () => {
       is_initialized: true
     }
     
-    window.electronAPI.workspace.getCurrent = vi.fn().mockResolvedValue(mockWorkspace)
-    window.electronAPI.api.getSkills = vi.fn().mockResolvedValue([])
+    const getCurrentWorkspaceMock = vi.spyOn(workspaceApi, 'getCurrentWorkspace').mockResolvedValue(mockWorkspace)
+    const getSkillsMock = vi.spyOn(skillsApi, 'getSkills').mockResolvedValue([])
     
     await store.loadCurrentWorkspace()
     
-    expect(window.electronAPI.workspace.getCurrent).toHaveBeenCalled()
+    expect(getCurrentWorkspaceMock).toHaveBeenCalled()
     expect(store.currentWorkspace).toEqual(mockWorkspace)
   })
 
@@ -99,16 +101,16 @@ describe('Workspace Store', () => {
       { name: 'Skill 3', source: 'system' }
     ]
     
-    window.electronAPI.api.getSkills = vi.fn().mockResolvedValue(mockSkills)
+    const getSkillsMock = vi.spyOn(skillsApi, 'getSkills').mockResolvedValue(mockSkills)
     
     await store.loadWorkspaceSkills()
     
-    expect(window.electronAPI.api.getSkills).toHaveBeenCalled()
+    expect(getSkillsMock).toHaveBeenCalled()
     expect(store.workspaceSkillsCount).toBe(2)
   })
 
   it('should handle load workspace skills error', async () => {
-    window.electronAPI.api.getSkills = vi.fn().mockRejectedValue(new Error('Failed to load skills'))
+    const getSkillsMock = vi.spyOn(skillsApi, 'getSkills').mockRejectedValue(new Error('Failed to load skills'))
     
     await store.loadWorkspaceSkills()
     
@@ -117,24 +119,39 @@ describe('Workspace Store', () => {
 
   it('should switch workspace', async () => {
     const mockResult = { success: true }
-    window.electronAPI.workspace.switch = vi.fn().mockResolvedValue(mockResult)
-    window.electronAPI.workspace.getCurrent = vi.fn().mockResolvedValue(null)
-    window.electronAPI.api.getSkills = vi.fn().mockResolvedValue([])
-    window.electronAPI.api.getWorkspaceSessions = vi.fn().mockResolvedValue({ sessions: [] })
+    const switchWorkspaceMock = vi.spyOn(workspaceApi, 'switchWorkspace').mockResolvedValue(mockResult)
+    const getCurrentWorkspaceMock = vi.spyOn(workspaceApi, 'getCurrentWorkspace').mockResolvedValue(null)
+    const getSkillsMock = vi.spyOn(skillsApi, 'getSkills').mockResolvedValue([])
+    
+    // Mock the dynamic imports
+    vi.mock('@/stores/session', () => ({
+      useSessionStore: vi.fn().mockReturnValue({
+        loadSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+        sessions: []
+      })
+    }))
+    
+    vi.mock('@/stores/app', () => ({
+      useAppStore: vi.fn().mockReturnValue({
+        setSessions: vi.fn(),
+        setCurrentSession: vi.fn(),
+        setTurns: vi.fn()
+      })
+    }))
     
     await store.switchWorkspace('/home/user/new-project')
     
-    expect(window.electronAPI.workspace.switch).toHaveBeenCalledWith('/home/user/new-project', false)
+    expect(switchWorkspaceMock).toHaveBeenCalledWith('/home/user/new-project', false)
   })
 
   it('should initialize workspace', async () => {
     const mockResult = { success: true }
-    window.electronAPI.workspace.initialize = vi.fn().mockResolvedValue(mockResult)
-    window.electronAPI.workspace.getCurrent = vi.fn().mockResolvedValue(null)
+    const initializeWorkspaceMock = vi.spyOn(workspaceApi, 'initializeWorkspace').mockResolvedValue(mockResult)
+    const getCurrentWorkspaceMock = vi.spyOn(workspaceApi, 'getCurrentWorkspace').mockResolvedValue(null)
     
     await store.initializeWorkspace('/home/user/project')
     
-    expect(window.electronAPI.workspace.initialize).toHaveBeenCalledWith('/home/user/project')
+    expect(initializeWorkspaceMock).toHaveBeenCalledWith('/home/user/project')
   })
 
   it('should set directory tree refresh callback', () => {

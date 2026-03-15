@@ -50,6 +50,7 @@
 import { ref, onMounted } from 'vue'
 import { Upload, Grid, CircleCheck, CircleClose, Loading } from '@element-plus/icons-vue'
 import type { Skill } from '../../types'
+import { getSkills } from '@/api/skills'
 
 const skills = ref<Skill[]>([])
 
@@ -59,8 +60,8 @@ onMounted(async () => {
 
 async function loadSkills() {
   try {
-    const data = await window.electronAPI.api.getSkills()
-    skills.value = data
+    const skillsList = await getSkills()
+    skills.value = skillsList
   } catch (error) {
     console.error('Failed to load skills:', error)
   }

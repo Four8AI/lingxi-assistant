@@ -113,6 +113,9 @@ class SessionManager:
             self.db_manager.db_path = new_db_path
             self.db_manager._init_db()
         
+        # 更新工作目录注册表，使用新的数据库路径
+        self.workspace_registry = WorkspaceRegistry(new_db_path)
+        
         self.logger.info(f"数据库路径已更新：{new_db_path}")
 
     def switch_workspace(self, workspace_path: str):

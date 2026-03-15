@@ -277,11 +277,11 @@ describe('ThoughtChainPanel Component', () => {
     
     const vm = wrapper.vm as any
     // Toggle expanded state
-    vm.expanded = true
+    vm.isExpanded = true
     await wrapper.vm.$nextTick()
     
     // Check component state
-    expect(vm.expanded).toBe(true)
+    expect(vm.isExpanded).toBe(true)
   })
 
   it('should not have rotating arrow icon when collapsed', () => {
@@ -292,6 +292,6 @@ describe('ThoughtChainPanel Component', () => {
     })
     
     const vm = wrapper.vm as any
-    expect(vm.expanded).toBe(false)
+    expect(vm.isExpanded).toBe(false)
   })
 })

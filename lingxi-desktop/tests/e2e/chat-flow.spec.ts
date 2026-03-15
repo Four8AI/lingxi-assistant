@@ -1,4 +1,4 @@
-import { test, expect, ElectronApplication, Page } from '@playwright/test'
+﻿import { test, expect, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import * as path from 'path'
 
@@ -51,9 +51,9 @@ test.describe('聊天功能流程测试', () => {
     }
   }, 60000)
   
-  test('应该能够正确启动并显示界面', async ({ skip }) => {
+  test('应该能够正确启动并显示界面', async () => {
     // 需要后端服务才能完整测试
-    skip()
+    test.skip("需要后端服务")
     
     const title = await page.title()
     expect(title).toBe('Lingxi Agent')
@@ -62,24 +62,24 @@ test.describe('聊天功能流程测试', () => {
     expect(isVisible).toBe(true)
   })
   
-  test('应该显示聊天核心组件', async ({ skip }) => {
-    skip()
+  test('应该显示聊天核心组件', async () => {
+    test.skip("需要后端服务")
     
     await page.waitForSelector('.chat-core', { timeout: 10000 })
     const chatCore = await page.locator('.chat-core')
     await expect(chatCore).toBeVisible()
   })
   
-  test('应该显示输入区域', async ({ skip }) => {
-    skip()
+  test('应该显示输入区域', async () => {
+    test.skip("需要后端服务")
     
     await page.waitForSelector('.chat-core-input', { timeout: 10000 })
     const inputArea = await page.locator('.chat-core-input')
     await expect(inputArea).toBeVisible()
   })
   
-  test('应该能够发送文本消息并接收回复', async ({ skip }) => {
-    skip()
+  test('应该能够发送文本消息并接收回复', async () => {
+    test.skip("需要后端服务")
     
     await page.waitForSelector('.chat-input textarea')
     const textarea = await page.locator('.chat-input textarea')
@@ -95,8 +95,8 @@ test.describe('聊天功能流程测试', () => {
     expect(messages).toBeGreaterThan(0)
   })
   
-  test('应该显示思考链过程', async ({ skip }) => {
-    skip()
+  test('应该显示思考链过程', async () => {
+    test.skip("需要后端服务")
     
     // 发送需要推理的问题
     await page.locator('.chat-input textarea').fill('请逐步推理：如果今天下雨，我会带伞。现在下雨了，我会带伞吗？')

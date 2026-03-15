@@ -142,9 +142,8 @@ describe('WorkspaceInitializer Component', () => {
   })
 
   it('should start initialization when going to step 1', async () => {
-    window.electronAPI.workspace.initialize = vi.fn().mockResolvedValue({
-      data: { lingxi_dir: '/test/workspace/.lingxi' }
-    })
+    const workspaceStore = useWorkspaceStore()
+    const initializeWorkspaceMock = vi.spyOn(workspaceStore, 'initializeWorkspace').mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceInitializer, mountOptions)
     
@@ -155,7 +154,7 @@ describe('WorkspaceInitializer Component', () => {
     await vm.handleNext()
     await wrapper.vm.$nextTick()
     
-    expect(window.electronAPI.workspace.initialize).toHaveBeenCalledWith('/test/workspace')
+    expect(initializeWorkspaceMock).toHaveBeenCalledWith('/test/workspace')
   })
 
   it('should show initialization progress', async () => {
@@ -186,9 +185,8 @@ describe('WorkspaceInitializer Component', () => {
   })
 
   it('should complete initialization successfully', async () => {
-    window.electronAPI.workspace.initialize = vi.fn().mockResolvedValue({
-      data: { lingxi_dir: '/test/workspace/.lingxi' }
-    })
+    const workspaceStore = useWorkspaceStore()
+    vi.spyOn(workspaceStore, 'initializeWorkspace').mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceInitializer, mountOptions)
     
@@ -204,9 +202,8 @@ describe('WorkspaceInitializer Component', () => {
   })
 
   it('should show completion step after successful initialization', async () => {
-    window.electronAPI.workspace.initialize = vi.fn().mockResolvedValue({
-      data: { lingxi_dir: '/test/workspace/.lingxi' }
-    })
+    const workspaceStore = useWorkspaceStore()
+    vi.spyOn(workspaceStore, 'initializeWorkspace').mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceInitializer, mountOptions)
     
@@ -283,7 +280,8 @@ describe('WorkspaceInitializer Component', () => {
   })
 
   it('should handle initialization failure', async () => {
-    window.electronAPI.workspace.initialize = vi.fn().mockRejectedValue(new Error('Init failed'))
+    const workspaceStore = useWorkspaceStore()
+    vi.spyOn(workspaceStore, 'initializeWorkspace').mockRejectedValue(new Error('Init failed'))
     
     const wrapper = mount(WorkspaceInitializer, mountOptions)
     
@@ -335,10 +333,8 @@ describe('WorkspaceInitializer Component', () => {
   })
 
   it('should show correct status text during initialization', async () => {
-    window.electronAPI.workspace.initialize = vi.fn().mockImplementation(async () => {
-      // Simulate the initialization process
-      return { data: { lingxi_dir: '/test/workspace/.lingxi' } }
-    })
+    const workspaceStore = useWorkspaceStore()
+    vi.spyOn(workspaceStore, 'initializeWorkspace').mockResolvedValue({ success: true })
     
     const wrapper = mount(WorkspaceInitializer, mountOptions)
     

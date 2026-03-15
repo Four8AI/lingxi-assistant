@@ -302,14 +302,14 @@ async function handleSend() {
 
     inputText.value = ''
 
-    // 通过 WebSocket 发送消息到后端
-    if (window.electronAPI?.ws && appStore.currentSessionId) {
+    // 使用前端 API 发送消息
+    if (appStore.currentSessionId) {
       try {
-        await window.electronAPI.ws.sendMessage(
-          userMessage,
-          appStore.currentSessionId,
-          thinkingMode.value
-        )
+        await sendMessage({
+          content: userMessage,
+          session_id: appStore.currentSessionId,
+          stream: true
+        })
       } catch (error) {
         console.error('Failed to send message:', error)
         // 更新助手消息为失败状态

@@ -16,15 +16,23 @@ export interface Session {
  */
 export async function getSessions(): Promise<Session[]> {
   const response = await apiClient.get('/api/sessions')
-  return response
+  return response.sessions || []
 }
 
 /**
  * 创建新会话
  */
-export async function createSession(name?: string): Promise<Session> {
-  const response = await apiClient.post('/api/sessions', { name })
-  return response
+export async function createSession(name?: string, workspacePath?: string): Promise<Session> {
+  const response = await apiClient.post('/api/sessions', { 
+    name, 
+    workspace_path: workspacePath 
+  })
+  return {
+    id: response.session_id,
+    name: response.first_message || response.name || '新会话',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
 }
 
 /**
@@ -41,8 +49,13 @@ export async function renameSession(
   sessionId: string, 
   name: string
 ): Promise<Session> {
-  const response = await apiClient.put(`/api/sessions/${sessionId}`, { name })
-  return response
+  const response = await apiClient.patch(`/api/sessions/${sessionId}`, { name })
+  return {
+    id: response.session_id,
+    name: response.name,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
 }
 
 /**
@@ -50,7 +63,13 @@ export async function renameSession(
  */
 export async function getCurrentSession(sessionId: string): Promise<Session> {
   const response = await apiClient.get(`/api/sessions/${sessionId}`)
-  return response
+  return {
+    id: response.session_id,
+    name: response.title,
+    created_at: response.created_at,
+    updated_at: response.updated_at,
+    message_count: response.task_count
+  }
 }
 
 /**
