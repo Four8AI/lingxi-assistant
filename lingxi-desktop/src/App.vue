@@ -19,9 +19,13 @@ import WorkspaceInitializer from './components/WorkspaceInitializer.vue'
 import WorkspaceSwitchDialog from './components/WorkspaceSwitchDialog.vue'
 import { useAppStore } from './stores/app'
 import { useWorkspaceStore } from './stores/workspace'
+import { useSessionStore } from './stores/session'
+import { useChatStore } from './stores/chat'
 
 const appStore = useAppStore()
 const workspaceStore = useWorkspaceStore()
+const sessionStore = useSessionStore()
+const chatStore = useChatStore()
 
 const isEdgeHidden = computed(() => {
   return window.electronAPI?.window?.edgeCheck?.() || false
@@ -71,27 +75,15 @@ async function initializeApp() {
         window.electronAPI.api.getResourceUsage()
       ])
 
-      // 根据工作目录加载会话列表
-      let sessions
-      const currentWorkspace = workspaceStore.currentWorkspace
-      if (currentWorkspace?.workspace) {
-        console.log('[App] Loading sessions for workspace:', currentWorkspace.workspace)
-        sessions = await window.electronAPI.api.getWorkspaceSessions(currentWorkspace.workspace)
-        sessions = sessions.sessions || []
-      } else {
-        console.log('[App] No workspace initialized, loading all sessions')
-        sessions = await window.electronAPI.api.getSessions()
+      // 使用 sessionStore 加载会话列表
+      try {
+        await sessionStore.loadSessions()
+      } catch (error) {
+        console.error('[App] Failed to load sessions:', error)
       }
-
-      // 转换后端返回的会话数据格式为前端期望的格式
-      const formattedSessions = (sessions || []).map((session: any) => ({
-        id: session.session_id || session.id,
-        name: session.title || session.name || '新会话',
-        createdAt: session.created_at ? new Date(session.created_at).getTime() : Date.now(),
-        updatedAt: session.updated_at ? new Date(session.updated_at).getTime() : Date.now()
-      }))
-
-      appStore.setSessions(formattedSessions)
+      
+      // 同步到 appStore
+      appStore.setSessions(sessionStore.sessions)
       
       // 转换后端返回的 checkpoint 数据格式为前端期望的格式
       const formattedCheckpoints = (checkpoints || []).map((checkpoint: any) => ({
@@ -104,9 +96,11 @@ async function initializeApp() {
       
       appStore.setResourceUsage(resourceUsage)
 
-      if (formattedSessions && formattedSessions.length > 0) {
-        appStore.setCurrentSession(formattedSessions[0].id)
-        const history = await window.electronAPI.api.getSessionHistory(formattedSessions[0].id)
+      if (sessionStore.sessions.length > 0) {
+        const firstSession = sessionStore.sessions[0]
+        appStore.setCurrentSession(firstSession.id)
+        sessionStore.setCurrentSession(firstSession.id)
+        const history = await window.electronAPI.api.getSessionHistory(firstSession.id)
         
         // 转换后端返回的历史记录格式为前端期望的格式
         // 后端返回的是任务列表（按created_at DESC排序），每个任务需要转换成用户消息和助手消息两条记录
@@ -117,7 +111,7 @@ async function initializeApp() {
           // 添加用户消息
           if (task.user_input) {
             turns.push({
-              id: `${formattedSessions[0].id}_user_${taskIndex}`,
+              id: `${firstSession.id}_user_${taskIndex}`,
               role: 'user',
               content: task.user_input,
               timestamp: task.created_at ? new Date(task.created_at).getTime() : Date.now(),
@@ -127,7 +121,7 @@ async function initializeApp() {
           
           // 添加助手消息
           turns.push({
-            id: `${formattedSessions[0].id}_assistant_${taskIndex}`,
+            id: `${firstSession.id}_assistant_${taskIndex}`,
             role: 'assistant',
             content: task.result || '',
             timestamp: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
@@ -147,24 +141,22 @@ async function initializeApp() {
         
         // 建立 WebSocket 连接
         if (window.electronAPI?.ws) {
-          await window.electronAPI.ws.connect(formattedSessions[0].id)
+          await window.electronAPI.ws.connect(firstSession.id)
         }
       } else {
         // 没有会话时，创建一个新会话
-        const sessionData = await window.electronAPI.api.createSession()
-        const session = {
-          id: sessionData.session_id,
-          name: sessionData.first_message || '新会话',
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        }
-        appStore.setSessions([session])
-        appStore.setCurrentSession(session.id)
-        appStore.setTurns([])
-        
-        // 建立 WebSocket 连接
-        if (window.electronAPI?.ws) {
-          await window.electronAPI.ws.connect(session.id)
+        try {
+          const session = await sessionStore.createNewSession()
+          appStore.setSessions(sessionStore.sessions)
+          appStore.setCurrentSession(session.id)
+          appStore.setTurns([])
+          
+          // 建立 WebSocket 连接
+          if (window.electronAPI?.ws) {
+            await window.electronAPI.ws.connect(session.id)
+          }
+        } catch (error) {
+          console.error('[App] Failed to create initial session:', error)
         }
       }
     }

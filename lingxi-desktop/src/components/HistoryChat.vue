@@ -76,6 +76,7 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useSessionStore } from '@/stores/session'
 import { ChatDotRound, Delete, Document, Edit, FolderOpened, MoreFilled, Plus } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { storeToRefs } from 'pinia'
@@ -83,6 +84,7 @@ import { computed } from 'vue'
 
 const appStore = useAppStore()
 const workspaceStore = useWorkspaceStore()
+const sessionStore = useSessionStore()
 const { sessions, currentSessionId } = storeToRefs(appStore)
 
 const filteredSessions = computed(() => {
@@ -109,21 +111,14 @@ async function handleSelectWorkspace() {
           // 重新加载工作区信息
           await workspaceStore.loadCurrentWorkspace()
           
-          // 重新加载会话列表（使用工作目录特定的 API）
-          const sessionsResult = await window.electronAPI.api.getWorkspaceSessions(selectedPath)
-          const sessions = sessionsResult.sessions || []
-          const formattedSessions = (sessions || []).map((session: any) => ({
-            id: session.session_id || session.id,
-            name: session.title || session.name || '新会话',
-            createdAt: session.created_at ? new Date(session.created_at).getTime() : Date.now(),
-            updatedAt: session.updated_at ? new Date(session.updated_at).getTime() : Date.now()
-          }))
-          
-          appStore.setSessions(formattedSessions)
+          // 使用 sessionStore 重新加载会话列表
+          await sessionStore.loadSessions()
+          // 同步到 appStore
+          appStore.setSessions(sessionStore.sessions)
           
           // 如果有会话，选择第一个；否则清空当前会话
-          if (formattedSessions && formattedSessions.length > 0) {
-            appStore.setCurrentSession(formattedSessions[0].id)
+          if (sessionStore.sessions.length > 0) {
+            appStore.setCurrentSession(sessionStore.sessions[0].id)
           } else {
             appStore.setCurrentSession(null)
             appStore.setTurns([])
@@ -157,14 +152,10 @@ function formatSessionTime(timestamp?: number): string {
 
 async function handleNewSession() {
   try {
-    const sessionData = await window.electronAPI.api.createSession()
-      const session = {
-      id: sessionData.session_id,
-      name: sessionData.first_message || '新会话',
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    }
-    appStore.setSessions([...sessions.value, session])
+    const session = await sessionStore.createNewSession()
+    // 同步到 appStore
+    appStore.setSessions(sessionStore.sessions)
+    appStore.setCurrentSession(session.id)
     await handleSelectSession(session.id)
   } catch (error) {
     console.error('Failed to create session:', error)
@@ -246,13 +237,10 @@ async function handleCommand(command: string, session: any) {
       })
       
       if (value) {
-        if (window.electronAPI.api.updateSessionName) {
-          await window.electronAPI.api.updateSessionName(session.id, value)
-        }
-        const updatedSessions = sessions.value.map(s =>
-          s.id === session.id ? { ...s, name: value, updatedAt: Date.now() } : s
-        )
-        appStore.setSessions(updatedSessions)
+        // 使用新的会话 API 重命名
+        await sessionStore.renameSession(session.id, value)
+        // 同步到 appStore
+        appStore.setSessions(sessionStore.sessions)
       }
     } catch {
       console.log('Rename cancelled')
@@ -270,16 +258,12 @@ async function handleCommand(command: string, session: any) {
         }
       )
       
-      if (window.electronAPI.api.deleteSession) {
-        await window.electronAPI.api.deleteSession(session.id)
-      }
-      const updatedSessions = sessions.value.filter(s => s.id !== session.id)
-      appStore.setSessions(updatedSessions)
-      
-      if (currentSessionId.value === session.id) {
-        appStore.setCurrentSession(updatedSessions[0]?.id || null)
-        appStore.setTurns([])
-      }
+      // 使用新的会话 API 删除
+      await sessionStore.deleteSession(session.id)
+      // 同步到 appStore
+      appStore.setSessions(sessionStore.sessions)
+      appStore.setCurrentSession(sessionStore.currentSessionId)
+      appStore.setTurns([])
     } catch {
       console.log('Delete cancelled')
     }

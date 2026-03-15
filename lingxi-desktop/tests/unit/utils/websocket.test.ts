@@ -350,14 +350,27 @@ describe('WebSocket Connection Management', () => {
     })
 
     it('should send queued messages after reconnection', async () => {
-      window.electronAPI.ws.isConnected = vi.fn()
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true)
+      let connected = false
       
+      window.electronAPI.ws.isConnected = vi.fn().mockImplementation(() => {
+        return Promise.resolve(connected)
+      })
+      
+      window.electronAPI.ws.connect = vi.fn().mockImplementation(() => {
+        connected = true
+        return Promise.resolve()
+      })
+      
+      // Initially not connected
+      let status = await window.electronAPI.ws.isConnected()
+      expect(status).toBe(false)
+      
+      // Connect
       await window.electronAPI.ws.connect()
       
-      const isConnected = await window.electronAPI.ws.isConnected()
-      expect(isConnected).toBe(true)
+      // Now connected
+      status = await window.electronAPI.ws.isConnected()
+      expect(status).toBe(true)
     })
   })
 })

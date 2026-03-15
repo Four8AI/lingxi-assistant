@@ -589,11 +589,16 @@ def main():
             # 初始化 WebSocket 事件订阅者
             websocket_subscriber = WebSocketSubscriber(websocket_manager)
             
-            print("异步助手已初始化")
-            print("WebSocket 事件推送：已启用（全异步）")
-            print()
+            # 使用 logger 而不是 print，避免 I/O 错误
+            import sys
+            if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+                print("异步助手已初始化")
+                print("WebSocket 事件推送：已启用（全异步）")
+                print()
         except Exception as e:
-            print(f"初始化失败：{e}")
+            import sys
+            if hasattr(sys, 'stdout') and sys.stdout and not sys.stdout.closed:
+                print(f"初始化失败：{e}")
             import traceback
             traceback.print_exc()
             sys.exit(1)

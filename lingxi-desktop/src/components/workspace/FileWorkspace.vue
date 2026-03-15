@@ -83,6 +83,8 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { openFile, listDirectory } from '@/api/file'
+import { electronAPI } from '@/utils/electron'
 import { FolderOpened, Loading } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
@@ -136,15 +138,29 @@ async function loadDirectoryTree(dirPath: string) {
   console.log('[FileWorkspace] loadDirectoryTree called with:', dirPath)
   loading.value = true
   try {
-    const treeData = await window.electronAPI.file.readDirectoryTree(dirPath, 3)
-    console.log('[FileWorkspace] readDirectoryTree result:', treeData)
-    if (treeData) {
-      fileTree.value = [treeData]
-      defaultExpandedKeys.value = [treeData.id]
-      console.log('[FileWorkspace] Directory tree loaded successfully, nodes:', fileTree.value.length)
+    // 优先使用 Electron API 读取目录树（如果有）
+    if (window.electronAPI?.file?.readDirectoryTree) {
+      const treeData = await window.electronAPI.file.readDirectoryTree(dirPath, 3)
+      console.log('[FileWorkspace] readDirectoryTree result:', treeData)
+      if (treeData) {
+        fileTree.value = [treeData]
+        defaultExpandedKeys.value = [treeData.id]
+        console.log('[FileWorkspace] Directory tree loaded successfully, nodes:', fileTree.value.length)
+      } else {
+        fileTree.value = []
+        console.log('[FileWorkspace] Directory tree is empty')
+      }
     } else {
-      fileTree.value = []
-      console.log('[FileWorkspace] Directory tree is empty')
+      // Web 环境下使用 API 列出目录
+      const files = await listDirectory(dirPath)
+      fileTree.value = files.map((file, index) => ({
+        id: `${file.path}-${index}`,
+        label: file.name,
+        path: file.path,
+        isDirectory: file.type === 'directory',
+        children: []
+      }))
+      console.log('[FileWorkspace] Directory loaded via API, nodes:', fileTree.value.length)
     }
   } catch (error) {
     console.error('[FileWorkspace] Failed to load directory tree:', error)
@@ -178,7 +194,14 @@ async function handleNodeDblClick(data: TreeNode) {
   // 只对文件执行双击打开操作，目录不处理
   if (!data.isDirectory) {
     try {
-      await window.electronAPI.file.openFile(data.path)
+      // 使用 Electron 适配层打开文件
+      if (electronAPI.isElectron()) {
+        await window.electronAPI.file.openFile(data.path)
+      } else {
+        // Web 环境下读取文件内容
+        const content = await openFile(data.path)
+        console.log('File content:', content)
+      }
     } catch (error) {
       console.error('Failed to open file:', error)
     }

@@ -37,16 +37,25 @@ const mockElectronAPI = {
   ws: {
     onWorkspaceFilesChanged: vi.fn(),
     sendMessage: vi.fn(),
-    isConnected: vi.fn().mockResolvedValue(true),
-    connect: vi.fn(),
-    disconnect: vi.fn()
+    isConnected: vi.fn().mockImplementation(() => Promise.resolve(true)),
+    connect: vi.fn().mockImplementation(() => Promise.resolve()),
+    disconnect: vi.fn().mockImplementation(() => Promise.resolve())
   },
   window: {
     minimize: vi.fn(),
     maximize: vi.fn(),
     close: vi.fn(),
     isMaximized: vi.fn().mockResolvedValue(false)
-  }
+  },
+  // 文件对话框
+  showOpenDialog: vi.fn().mockResolvedValue({ canceled: false, files: [] }),
+  showSaveDialog: vi.fn(),
+  // 系统信息
+  getPlatform: vi.fn(() => 'win32'),
+  getVersion: vi.fn(() => '2.0.0'),
+  // 文件读写
+  readFile: vi.fn(),
+  writeFile: vi.fn()
 }
 
 // 设置全局 mock

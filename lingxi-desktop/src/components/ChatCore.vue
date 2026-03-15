@@ -100,11 +100,19 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '../stores/app'
+import { useChatStore } from '../stores/chat'
+import { useSessionStore } from '../stores/session'
+import { sendMessage } from '@/api/chat'
+import { createSession } from '@/api/session'
+import { uploadFile } from '@/api/file'
+import { electronAPI } from '@/utils/electron'
 import { Plus, Upload, Edit, Delete, Download, Picture, View, Star } from '@element-plus/icons-vue'
 import MessageList from './chat/MessageList.vue'
 import { ElMessageBox, ElSwitch } from 'element-plus'
 
 const appStore = useAppStore()
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 
 const inputText = ref('')
 const mode = ref('plan')
@@ -163,15 +171,8 @@ async function handleRenameSession() {
     })
 
     if (value) {
-      // 调用后端 API 更新会话名称
-      if (window.electronAPI.api.updateSessionName) {
-        await window.electronAPI.api.updateSessionName(appStore.currentSessionId, value)
-      }
-      // 更新前端会话列表
-      const updatedSessions = appStore.sessions.map(s =>
-        s.id === appStore.currentSessionId ? { ...s, name: value } : s
-      )
-      appStore.setSessions(updatedSessions)
+      // 使用新的会话 API 更新会话名称
+      await sessionStore.renameSession(appStore.currentSessionId, value)
     }
   } catch {
     console.log('Rename cancelled')
@@ -188,10 +189,8 @@ async function handleClearHistory() {
       type: 'warning'
     })
 
-    // 调用后端 API 清除会话历史
-    if (window.electronAPI.api.clearSessionHistory) {
-      await window.electronAPI.api.clearSessionHistory(appStore.currentSessionId)
-    }
+    // 使用新的聊天 API 清除历史
+    await chatStore.clearHistoryMessages(appStore.currentSessionId)
     // 清空前端历史记录
     appStore.setTurns([])
   } catch {
@@ -209,19 +208,11 @@ async function handleDeleteSession() {
       type: 'danger'
     })
 
-    // 调用后端 API 删除会话
-    if (window.electronAPI.api.deleteSession) {
-      await window.electronAPI.api.deleteSession(appStore.currentSessionId)
-    }
-    // 更新前端会话列表
-    const updatedSessions = appStore.sessions.filter(
-      s => s.id !== appStore.currentSessionId
-    )
-    appStore.setSessions(updatedSessions)
-    // 切换到第一个会话
-    if (updatedSessions.length > 0) {
-      appStore.setCurrentSession(updatedSessions[0].id)
-    }
+    // 使用新的会话 API 删除会话
+    await sessionStore.deleteSession(appStore.currentSessionId)
+    // 同步到 appStore
+    appStore.setSessions(sessionStore.sessions)
+    appStore.setCurrentSession(sessionStore.currentSessionId)
   } catch {
     console.log('Delete cancelled')
   }
@@ -247,8 +238,25 @@ function handleAddEmoji() {
   // 实现添加表情功能
 }
 
-function handleUpload() {
-  window.electronAPI.file.selectFiles()
+async function handleUpload() {
+  // 使用 Electron 适配层打开文件对话框
+  const result = await electronAPI.openFileDialog({
+    filters: [{ name: 'All Files', extensions: ['*'] }]
+  })
+  
+  if (!result.canceled && result.files) {
+    // 上传文件
+    for (const file of result.files) {
+      try {
+        const fileInfo = await uploadFile(file)
+        console.log('File uploaded:', fileInfo)
+        // 在输入框中插入文件信息
+        inputText.value += `\n📎 ${fileInfo.name}\n`
+      } catch (error) {
+        console.error('Failed to upload file:', error)
+      }
+    }
+  }
 }
 
 async function handleSend() {
@@ -259,16 +267,9 @@ async function handleSend() {
     // 如果没有当前会话，创建一个新会话
     if (!appStore.currentSessionId) {
       try {
-        const result = await window.electronAPI.api.createSession('新会话')
-        if (result && result.session_id) {
-          appStore.setCurrentSession(result.session_id)
-          appStore.setSessions([...appStore.sessions, {
-            id: result.session_id,
-            name: '新会话'
-          }])
-        } else {
-          throw new Error('创建会话失败')
-        }
+        const session = await sessionStore.createNewSession('新会话')
+        appStore.setSessions(sessionStore.sessions)
+        appStore.setCurrentSession(session.id)
       } catch (error) {
         console.error('Failed to create session:', error)
         return
