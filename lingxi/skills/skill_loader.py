@@ -78,6 +78,41 @@ class SkillLoader:
 
         self.logger.debug(f"技能扫描完成，成功注册 {registered_count} 个技能")
         return registered_count
+    
+    def _register_skill(self, registry, skill_dir: str, skill_config: Dict[str, Any]) -> bool:
+        """注册单个技能到注册表
+        
+        Args:
+            registry: 技能注册表
+            skill_dir: 技能目录路径
+            skill_config: 技能配置
+            
+        Returns:
+            是否注册成功
+        """
+        try:
+            skill_id = skill_config.get('name', '')
+            if not skill_id:
+                self.logger.error(f"技能配置缺少 name 字段：{skill_dir}")
+                return False
+            
+            # 调用 registry 的注册方法
+            if hasattr(registry, 'register_skill_from_dir'):
+                registry.register_skill_from_dir(skill_dir)
+                self.logger.info(f"注册技能成功：{skill_id}")
+                return True
+            elif hasattr(registry, 'register_skill'):
+                # 使用原始调用方式：只传 config
+                registry.register_skill(skill_config)
+                self.logger.info(f"注册技能成功：{skill_id}")
+                return True
+            else:
+                self.logger.error(f"Registry 对象没有 register_skill 方法")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"注册技能失败 {skill_dir}: {e}")
+            return False
 
     def _find_skill_directories(self) -> List[str]:
         """查找所有技能目录
@@ -163,6 +198,50 @@ class SkillLoader:
 
         self.logger.warning(f"技能配置文件不存在：{skill_dir}")
         return None
+    
+    def _load_mcp_config(self, skill_md_path: str) -> Optional[Dict[str, Any]]:
+        """从 SKILL.md 文件加载 MCP 格式配置
+        
+        Args:
+            skill_md_path: SKILL.md 文件路径
+            
+        Returns:
+            技能配置字典
+        """
+        try:
+            import re
+            
+            with open(skill_md_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 解析 YAML front matter
+            yaml_match = re.search(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+            if not yaml_match:
+                return None
+            
+            yaml_content = yaml_match.group(1)
+            
+            # 简单的 YAML 解析
+            config = {}
+            for line in yaml_content.split('\n'):
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if value.lower() == 'true':
+                        value = True
+                    elif value.lower() == 'false':
+                        value = False
+                    elif value.isdigit():
+                        value = int(value)
+                    config[key] = value
+            
+            return config
+            
+        except Exception as e:
+            self.logger.error(f"加载 SKILL.md 失败：{e}")
+            return None
+    
     def _parse_parameters(self, input_schema: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """解析输入参数配置
 
