@@ -614,21 +614,49 @@ class SessionManager:
         """
         return self.context_manager.retrieve_relevant_history(query, top_k)
 
-    def list_all_sessions(self) -> List[Dict[str, Any]]:
+    def list_all_sessions(self, workspace_path: Optional[str] = None) -> List[Dict[str, Any]]:
         """列出所有会话
+
+        Args:
+            workspace_path: 工作目录路径（可选）
 
         Returns:
             会话列表，包含session_id、创建时间、更新时间、消息数量等信息
         """
-        conn = self.db_manager.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT s.session_id, s.title, s.created_at, s.updated_at, COUNT(t.task_id) as task_count
-            FROM sessions s
-            LEFT JOIN tasks t ON s.session_id = t.session_id
-            GROUP BY s.session_id
-            ORDER BY s.updated_at DESC
-        """)
+        if workspace_path:
+            # 从工作目录注册表中获取该工作目录关联的会话
+            workspace_sessions = self.workspace_registry.get_sessions_by_workspace_path(workspace_path)
+            
+            # 构建会话ID列表
+            session_ids = [s['session_id'] for s in workspace_sessions]
+            if not session_ids:
+                return []
+            
+            # 构建IN查询
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(session_ids))
+            query = f"""
+                SELECT s.session_id, s.title, s.created_at, s.updated_at, COUNT(t.task_id) as task_count
+                FROM sessions s
+                LEFT JOIN tasks t ON s.session_id = t.session_id
+                WHERE s.session_id IN ({placeholders})
+                GROUP BY s.session_id
+                ORDER BY s.updated_at DESC
+            """
+            cursor.execute(query, session_ids)
+        else:
+            # 列出所有会话
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT s.session_id, s.title, s.created_at, s.updated_at, COUNT(t.task_id) as task_count
+                FROM sessions s
+                LEFT JOIN tasks t ON s.session_id = t.session_id
+                GROUP BY s.session_id
+                ORDER BY s.updated_at DESC
+            """)
+        
         rows = cursor.fetchall()
         conn.close()
 
@@ -750,12 +778,33 @@ class SessionManager:
         """
         import uuid
         session_id = str(uuid.uuid4())
+        return self.create_session_by_id(session_id, user_name, system_prompt)
 
+    def create_session_by_id(self, session_id: str, user_name: str = "default", system_prompt: str = None, workspace_path: Optional[str] = None) -> str:
+        """根据指定的会话 ID 创建新会话
+
+        Args:
+            session_id: 会话 ID
+            user_name: 用户名
+            system_prompt: 基础系统提示词（可选）
+            workspace_path: 工作目录路径（可选）
+
+        Returns:
+            会话 ID
+        """
         sql = """
             INSERT INTO sessions (session_id, user_name, title, total_tokens, created_at, updated_at)
             VALUES (?, ?, '新会话', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """
         self.db_manager.execute_sql(sql, (session_id, user_name))
+
+        # 如果指定了工作目录，关联会话和工作目录
+        if workspace_path:
+            success = self.workspace_registry.associate_session_with_workspace(session_id, workspace_path)
+            if success:
+                self.logger.debug(f"会话已关联到工作目录：{session_id} -> {workspace_path}")
+            else:
+                self.logger.warning(f"会话关联工作目录失败：{session_id} -> {workspace_path}")
 
         # 注入 SOUL 到会话
         if self.soul_injector.soul_data:

@@ -36,7 +36,9 @@ def setup_logging(config: Dict[str, Any] = None):
     # 清除现有处理器
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-        handler.close()
+        # 不要关闭 StreamHandler，因为它可能使用 sys.stdout 或 sys.stderr
+        if not isinstance(handler, logging.StreamHandler):
+            handler.close()
     
     # 创建自定义过滤器
     quiet_exception_filter = QuietExceptionFilter()

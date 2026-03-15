@@ -155,9 +155,9 @@ async function loadDirectoryTree(dirPath: string) {
 }
 
 function refreshTree() {
-  if (currentWorkspace.value) {
-    console.log('[FileWorkspace] 刷新目录树:', currentWorkspace.value)
-    loadDirectoryTree(currentWorkspace.value)
+  if (currentWorkspace.value && currentWorkspace.value.workspace) {
+    console.log('[FileWorkspace] 刷新目录树:', currentWorkspace.value.workspace)
+    loadDirectoryTree(currentWorkspace.value.workspace)
   }
 }
 
@@ -210,10 +210,16 @@ function handleContextMenuVisibleChange(visible: boolean) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   console.log('[FileWorkspace] onMounted called')
   workspaceStore.setDirectoryTreeRefreshCallback(refreshTree)
   workspaceStore.setupFileChangeListener()
+  
+  // 初始加载目录树
+  if (currentWorkspace.value && currentWorkspace.value.workspace) {
+    console.log('[FileWorkspace] Initial load directory tree:', currentWorkspace.value.workspace)
+    await loadDirectoryTree(currentWorkspace.value.workspace)
+  }
 })
 
 onUnmounted(() => {
