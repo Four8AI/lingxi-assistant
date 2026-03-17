@@ -15,13 +15,13 @@ class SkillLoader:
     
     _instance = None  # 单例实例
     
-    def __new__(cls, config: Dict[str, Any], registry=None, cache=None):
+    def __new__(cls, config: Dict[str, Any], registry=None, cache=None, sandbox=None, **kwargs):
         """单例模式：确保只创建一个实例"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self, config: Dict[str, Any], registry=None, cache=None):
+    def __init__(self, config: Dict[str, Any], registry=None, cache=None, sandbox=None, **kwargs):
         # 防止重复初始化
         if hasattr(self, '_initialized'):
             return
@@ -32,6 +32,7 @@ class SkillLoader:
             config: 系统配置
             registry: 技能注册表对象
             cache: 技能缓存对象（可选）
+            sandbox: 安全沙箱对象（可选）
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class SkillLoader:
         # 注册表和缓存引用
         self.registry = registry
         self.cache = cache  # 新增缓存引用
+        self.sandbox = sandbox  # 新增沙箱引用，用于路径转换
 
         self.logger.debug(f"初始化技能加载器，内置技能目录: {self.builtin_skills_dir}, 用户技能目录: {self.user_skills_dir}")
         self._initialized = True
@@ -100,15 +102,18 @@ class SkillLoader:
             if hasattr(registry, 'register_skill_from_dir'):
                 registry.register_skill_from_dir(skill_dir)
                 self.logger.info(f"注册技能成功：{skill_id}")
-                return True
             elif hasattr(registry, 'register_skill'):
                 # 使用原始调用方式：只传 config
                 registry.register_skill(skill_config)
                 self.logger.info(f"注册技能成功：{skill_id}")
-                return True
             else:
                 self.logger.error(f"Registry 对象没有 register_skill 方法")
                 return False
+            
+            # 注册成功后，加载技能模块到内存
+            self._load_local_skill_module(skill_dir, skill_id)
+            
+            return True
                 
         except Exception as e:
             self.logger.error(f"注册技能失败 {skill_dir}: {e}")
@@ -350,6 +355,10 @@ class SkillLoader:
         if skill_id not in self.loaded_modules:
             return f"错误: 技能模块未加载: {skill_id}"
 
+        # 转换路径参数为绝对路径（基于当前工作目录）
+        if self.sandbox and parameters:
+            parameters = self._normalize_paths(parameters, skill_id)
+
         module = self.loaded_modules[skill_id]
 
         try:
@@ -369,6 +378,37 @@ class SkillLoader:
         except Exception as e:
             self.logger.error(f"执行技能失败 {skill_id}: {e}")
             return f"错误: 技能执行失败 - {str(e)}"
+
+    def _normalize_paths(self, parameters: Dict[str, Any], skill_id: str) -> Dict[str, Any]:
+        """转换路径参数为绝对路径（基于当前工作目录）
+
+        Args:
+            parameters: 技能参数
+            skill_id: 技能ID
+
+        Returns:
+            转换后的参数
+        """
+        from pathlib import Path
+        
+        # 定义需要转换路径的参数名
+        path_params = ['file_path', 'file', 'path', 'directory', 'dir', 'workspace', 'workspace_path']
+        
+        normalized = {}
+        for key, value in parameters.items():
+            if key in path_params and isinstance(value, str):
+                # 如果是相对路径，转换为基于工作目录的绝对路径
+                if not Path(value).is_absolute():
+                    workspace_root = self.sandbox.get_workspace_root()
+                    normalized_value = str(workspace_root / value)
+                    self.logger.debug(f"路径转换: {skill_id}.{key}: {value} -> {normalized_value}")
+                    normalized[key] = normalized_value
+                else:
+                    normalized[key] = value
+            else:
+                normalized[key] = value
+        
+        return normalized
 
     def install_skill(self, skill_source: str, registry, skill_name: str = None, overwrite: bool = False) -> bool:
         """安装技能到用户技能目录

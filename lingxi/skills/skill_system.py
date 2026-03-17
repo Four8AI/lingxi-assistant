@@ -41,23 +41,23 @@ class SkillSystem:
             self.logger.debug("使用 SQLite 数据库注册表")
             self.registry = SkillRegistry(config)
         
-        # 2. 初始化缓存
-        cache_ttl = skills_config.get("cache_ttl", 300)
-        self.cache = SkillCache(ttl=cache_ttl)
-        self.logger.debug(f"技能缓存已初始化，TTL={cache_ttl}秒")
-        
-        # 3. 初始化技能加载器（使用统一的注册表和缓存）
-        self.loader = SkillLoader(config, self.registry, self.cache)
-        
-        # 4. 初始化安全沙箱
+        # 2. 初始化安全沙箱
         security_config = config.get("security", {})
         self.sandbox = SecuritySandbox(
-            workspace_root=security_config.get("workspace_root", "./workspace"),
+            workspace_root=None,  # 不设置默认值，等待实际工作目录
             max_file_size=security_config.get("max_file_size", 10 * 1024 * 1024),
             allowed_commands=security_config.get("allowed_commands"),
             safety_mode=security_config.get("safety_mode", True)
         )
         self.logger.debug("安全沙箱已初始化")
+        
+        # 3. 初始化缓存
+        cache_ttl = skills_config.get("cache_ttl", 300)
+        self.cache = SkillCache(ttl=cache_ttl)
+        self.logger.debug(f"技能缓存已初始化，TTL={cache_ttl}秒")
+        
+        # 4. 初始化技能加载器（使用统一的注册表、缓存和沙箱）
+        self.loader = SkillLoader(config, self.registry, self.cache, self.sandbox)
         
         # 5. 扫描并注册技能
         self._load_skills()
@@ -70,6 +70,58 @@ class SkillSystem:
         self.logger.info("开始扫描和注册技能...")
         count = self.loader.scan_and_register(self.registry)
         self.logger.info(f"技能加载完成，成功注册 {count} 个技能")
+    
+    def update_workspace(self, workspace_path: str):
+        """更新工作目录（用于动态切换工作区）
+        
+        Args:
+            workspace_path: 新的工作目录路径
+        """
+        self.logger.info(f"更新技能系统的工作目录：{workspace_path}")
+        
+        # 更新 SecuritySandbox 的工作目录
+        if self.sandbox:
+            from pathlib import Path
+            self.sandbox.update_workspace(Path(workspace_path))
+        
+        self.logger.debug(f"SecuritySandbox 工作目录已更新为：{self.sandbox.get_workspace_root()}")
+        
+        # 清除旧技能缓存并重新加载新工作目录的技能
+        self._reload_skills(reload_builtin=False)
+    
+    def _reload_skills(self, reload_builtin: bool = False):
+        """重新加载技能（用于工作目录切换后）
+        
+        Args:
+            reload_builtin: 是否重新加载内置技能（默认只重新加载工作目录技能）
+        """
+        self.logger.info("重新加载技能...")
+        
+        # 清除技能缓存
+        if self.cache:
+            self.cache.invalidate_all()
+            self.logger.debug("技能缓存已清空")
+        
+        # 清除已加载的技能模块
+        if self.loader:
+            self.loader.loaded_modules.clear()
+            self.logger.debug("已加载的技能模块已清空")
+        
+        # 重新扫描和注册技能
+        if reload_builtin:
+            # 重新加载所有技能（包括内置和工作目录技能）
+            count = self.loader.scan_and_register(self.registry)
+            self.logger.info(f"技能重新加载完成，成功注册 {count} 个技能")
+        else:
+            # 只重新加载工作目录下的技能（不重新加载内置技能）
+            # 临时修改 loader 的扫描目录为只包含工作目录技能
+            original_builtin = self.loader.builtin_skills_dir
+            self.loader.builtin_skills_dir = None  # 禁用内置技能目录扫描
+            
+            count = self.loader.scan_and_register(self.registry)
+            self.loader.builtin_skills_dir = original_builtin  # 恢复内置技能目录
+            
+            self.logger.info(f"工作目录技能重新加载完成，成功注册 {count} 个技能")
     
     def execute_skill(self, skill_name: str, parameters: Dict[str, Any] = None) -> str:
         """执行技能（统一入口）"""

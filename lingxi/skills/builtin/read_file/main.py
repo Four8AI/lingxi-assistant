@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Read file skill - 增强版，支持流式读取、编码自动检测"""
-
 import logging
 import chardet
 from typing import Dict, Any

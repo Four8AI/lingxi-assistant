@@ -45,15 +45,6 @@ class SkillCaller:
         self.sandbox = self.skill_system.sandbox
 
 
-        # 初始化安全沙箱（V4.0新增）
-        security_config = config.get("security", {})
-        self.sandbox = SecuritySandbox(
-            workspace_root=security_config.get("workspace_root", "./workspace"),
-            max_file_size=security_config.get("max_file_size", 10 * 1024 * 1024),
-            allowed_commands=security_config.get("allowed_commands"),
-            safety_mode=security_config.get("safety_mode", True)
-        )
-
         # 工作空间管理器（V4.0 新增）
         self.workspace_manager = None
         
