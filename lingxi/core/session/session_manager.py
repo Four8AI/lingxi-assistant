@@ -702,45 +702,81 @@ class SessionManager:
                 cursor.close()
 
                 # 确保时间戳格式正确并转换为本地时间
+                import pytz
+                local_tz = pytz.timezone('Asia/Shanghai')
+                utc_tz = pytz.utc
+                
                 if isinstance(created_at, datetime):
                     # 转换为本地时间
-                    import pytz
-                    local_tz = pytz.timezone('Asia/Shanghai')
                     if created_at.tzinfo is None:
-                        # 假设存储的是UTC时间，转换为本地时间
-                        created_at = pytz.utc.localize(created_at).astimezone(local_tz)
+                        # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                        created_at = utc_tz.localize(created_at)
+                        # 然后转换为本地时间
+                        created_at = created_at.astimezone(local_tz)
+                    else:
+                        # 如果有时区信息，转换为本地时间
+                        created_at = created_at.astimezone(local_tz)
                     created_at_str = created_at.isoformat()
                 else:
                     # 如果是字符串，先解析为datetime，再转换为本地时间
-                    import pytz
-                    local_tz = pytz.timezone('Asia/Shanghai')
                     try:
                         created_at_dt = datetime.fromisoformat(created_at)
                         if created_at_dt.tzinfo is None:
-                            created_at_dt = pytz.utc.localize(created_at_dt).astimezone(local_tz)
+                            # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                            created_at_dt = utc_tz.localize(created_at_dt)
+                            # 然后转换为本地时间
+                            created_at_dt = created_at_dt.astimezone(local_tz)
+                        else:
+                            # 如果有时区信息，转换为本地时间
+                            created_at_dt = created_at_dt.astimezone(local_tz)
                         created_at_str = created_at_dt.isoformat()
                     except:
-                        created_at_str = created_at
+                        # 尝试另一种格式解析
+                        try:
+                            created_at_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                            # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                            created_at_dt = utc_tz.localize(created_at_dt)
+                            # 然后转换为本地时间
+                            created_at_dt = created_at_dt.astimezone(local_tz)
+                            created_at_str = created_at_dt.isoformat()
+                        except:
+                            created_at_str = created_at
                 
                 if isinstance(updated_at, datetime):
                     # 转换为本地时间
-                    import pytz
-                    local_tz = pytz.timezone('Asia/Shanghai')
                     if updated_at.tzinfo is None:
-                        # 假设存储的是UTC时间，转换为本地时间
-                        updated_at = pytz.utc.localize(updated_at).astimezone(local_tz)
+                        # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                        updated_at = utc_tz.localize(updated_at)
+                        # 然后转换为本地时间
+                        updated_at = updated_at.astimezone(local_tz)
+                    else:
+                        # 如果有时区信息，转换为本地时间
+                        updated_at = updated_at.astimezone(local_tz)
                     updated_at_str = updated_at.isoformat()
                 else:
                     # 如果是字符串，先解析为datetime，再转换为本地时间
-                    import pytz
-                    local_tz = pytz.timezone('Asia/Shanghai')
                     try:
                         updated_at_dt = datetime.fromisoformat(updated_at)
                         if updated_at_dt.tzinfo is None:
-                            updated_at_dt = pytz.utc.localize(updated_at_dt).astimezone(local_tz)
+                            # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                            updated_at_dt = utc_tz.localize(updated_at_dt)
+                            # 然后转换为本地时间
+                            updated_at_dt = updated_at_dt.astimezone(local_tz)
+                        else:
+                            # 如果有时区信息，转换为本地时间
+                            updated_at_dt = updated_at_dt.astimezone(local_tz)
                         updated_at_str = updated_at_dt.isoformat()
                     except:
-                        updated_at_str = updated_at
+                        # 尝试另一种格式解析
+                        try:
+                            updated_at_dt = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                            # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                            updated_at_dt = utc_tz.localize(updated_at_dt)
+                            # 然后转换为本地时间
+                            updated_at_dt = updated_at_dt.astimezone(local_tz)
+                            updated_at_str = updated_at_dt.isoformat()
+                        except:
+                            updated_at_str = updated_at
 
                 sessions.append({
                     "session_id": session_id,
@@ -783,16 +819,72 @@ class SessionManager:
 
         task_list = self.task_manager.get_tasks_by_session(session_id)
 
-        # 确保时间戳格式正确
-        if isinstance(created_at, datetime):
-            created_at_str = created_at.isoformat()
-        else:
-            created_at_str = created_at
+        # 确保时间戳格式正确并转换为本地时间
+        import pytz
+        local_tz = pytz.timezone('Asia/Shanghai')
+        utc_tz = pytz.utc
         
-        if isinstance(updated_at, datetime):
-            updated_at_str = updated_at.isoformat()
+        # 处理创建时间
+        self.logger.debug(f"原始创建时间: {created_at}, 类型: {type(created_at)}")
+        if isinstance(created_at, datetime):
+            # 转换为本地时间
+            if created_at.tzinfo is None:
+                # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                created_at = utc_tz.localize(created_at)
+                # 然后转换为本地时间
+                created_at = created_at.astimezone(local_tz)
+            else:
+                # 如果有时区信息，转换为本地时间
+                created_at = created_at.astimezone(local_tz)
+            created_at_str = created_at.isoformat()
+            self.logger.debug(f"转换后创建时间: {created_at_str}")
         else:
-            updated_at_str = updated_at
+            # 如果是字符串，解析为datetime并转换为本地时间
+            try:
+                # 解析数据库存储的时间格式
+                created_at_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                created_at_dt = utc_tz.localize(created_at_dt)
+                # 然后转换为本地时间
+                created_at_dt = created_at_dt.astimezone(local_tz)
+                created_at_str = created_at_dt.isoformat()
+                self.logger.debug(f"解析后创建时间: {created_at_str}")
+            except Exception as e:
+                # 如果解析失败，使用当前时间
+                self.logger.error(f"时间解析失败: {e}")
+                created_at_str = datetime.now(local_tz).isoformat()
+                self.logger.debug(f"使用当前时间: {created_at_str}")
+        
+        # 处理更新时间
+        self.logger.debug(f"原始更新时间: {updated_at}, 类型: {type(updated_at)}")
+        if isinstance(updated_at, datetime):
+            # 转换为本地时间
+            if updated_at.tzinfo is None:
+                # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                updated_at = utc_tz.localize(updated_at)
+                # 然后转换为本地时间
+                updated_at = updated_at.astimezone(local_tz)
+            else:
+                # 如果有时区信息，转换为本地时间
+                updated_at = updated_at.astimezone(local_tz)
+            updated_at_str = updated_at.isoformat()
+            self.logger.debug(f"转换后更新时间: {updated_at_str}")
+        else:
+            # 如果是字符串，解析为datetime并转换为本地时间
+            try:
+                # 解析数据库存储的时间格式
+                updated_at_dt = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                # SQLite的CURRENT_TIMESTAMP存储的是UTC时间，先添加UTC时区信息
+                updated_at_dt = utc_tz.localize(updated_at_dt)
+                # 然后转换为本地时间
+                updated_at_dt = updated_at_dt.astimezone(local_tz)
+                updated_at_str = updated_at_dt.isoformat()
+                self.logger.debug(f"解析后更新时间: {updated_at_str}")
+            except Exception as e:
+                # 如果解析失败，使用当前时间
+                self.logger.error(f"时间解析失败: {e}")
+                updated_at_str = datetime.now(local_tz).isoformat()
+                self.logger.debug(f"使用当前时间: {updated_at_str}")
 
         return {
             "session_id": session_id,
@@ -845,6 +937,25 @@ class SessionManager:
 
         return deleted
 
+    def delete_all_sessions(self) -> int:
+        """删除所有会话
+
+        Returns:
+            删除的会话数量
+        """
+        # 清空内存缓存
+        self.memory_cache.clear()
+
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM sessions")
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        self.logger.info(f"已删除所有会话，共 {deleted_count} 个")
+        return deleted_count
+
     def create_session(self, user_name: str = "default", system_prompt: str = None) -> str:
         """创建新会话
 
@@ -872,19 +983,22 @@ class SessionManager:
             会话 ID
         """
         # 生成递增的会话名称
-        conn = self.db_manager.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM sessions")
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        session_title = f"会话{count + 1}"
-        
-        sql = """
-            INSERT INTO sessions (session_id, user_name, title, total_tokens, created_at, updated_at)
-            VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """
-        self.db_manager.execute_sql(sql, (session_id, user_name, session_title))
+        with self.db_manager.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM sessions")
+            count = cursor.fetchone()[0]
+            
+            # 确保会话名称是递增的
+            session_title = f"会话{count + 1}"
+            
+            # 执行插入操作
+            sql = """
+                INSERT INTO sessions (session_id, user_name, title, total_tokens, created_at, updated_at)
+                VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """
+            cursor.execute(sql, (session_id, user_name, session_title))
+            
+            self.logger.debug(f"创建会话：session_id={session_id}, user_name={user_name}, title={session_title}, count={count}")
 
         # 如果指定了工作目录，关联会话和工作目录
         if workspace_path:
